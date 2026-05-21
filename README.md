@@ -1,16 +1,22 @@
-# khajaattariya
+# Khaja Attariya 🍽️
 
-Food delivery app for Attariya
+> Delicious food to your doorstep.
 
-## Getting Started
+A food delivery platform built for Attariya, Kailali — connecting
+local restaurants with customers for fast, reliable delivery.
 
-This project is a starting point for a Flutter application.
+## Tech Stack
 
-A few resources to get you started if this is your first Flutter project:
+- **Frontend** — Flutter (Android, iOS, Web)
+- **Backend** — Supabase
+- **State Management** — Riverpod
+- **Navigation** — go_router
+- **Architecture** — Clean Architecture + MVVM
 
-- [Lab: Write your first Flutter app](https://docs.flutter.dev/get-started/codelab)
-- [Cookbook: Useful Flutter samples](https://docs.flutter.dev/cookbook)
+## Status
 
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev/), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
+🚧 Under active development
+
+## License
+
+Copyright © 2026 Bishal Joshi. All Rights Reserved.
