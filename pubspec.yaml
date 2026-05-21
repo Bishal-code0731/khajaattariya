@@ -1,0 +1,86 @@
+name: khajaattariya
+description: "Food delivery app for Attariya, Kailali"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.0.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # ── State Management ──────────────────────────────────
+  # Riverpod manages all data and logic across the app.
+  # When data changes, only the widgets that need it rebuild.
+  flutter_riverpod: ^2.5.1
+  riverpod_annotation: ^2.3.5
+
+  # ── Navigation ────────────────────────────────────────
+  # go_router controls which screen shows based on the URL/route.
+  # Supports deep linking — opening a specific screen from a notification.
+  go_router: ^14.2.0
+
+  # ── Networking ────────────────────────────────────────
+  # Dio makes HTTP requests to our backend (Supabase).
+  # Better than Flutter's built-in http package — supports interceptors,
+  # which we use for automatically attaching JWT tokens to every request.
+  dio: ^5.4.3+1
+
+  # ── Data Models ───────────────────────────────────────
+  # freezed makes our models immutable (data can't be accidentally changed)
+  # and auto-generates == and copyWith for us.
+  # json_annotation auto-generates fromJson/toJson so we never write
+  # JSON parsing code by hand.
+  freezed_annotation: ^2.4.1
+  json_annotation: ^4.9.0
+
+  # ── Backend ───────────────────────────────────────────
+  # Supabase is our entire backend.
+  # Gives us: authentication, database, file storage, realtime updates.
+  # Free tier is more than enough for launch.
+  supabase_flutter: ^2.5.6
+
+  # ── Secure Storage ────────────────────────────────────
+  # Stores JWT tokens safely on the device.
+  # More secure than SharedPreferences which stores data as plain text.
+  flutter_secure_storage: ^9.2.2
+
+  # ── Images ────────────────────────────────────────────
+  # Loads images from the internet and caches them.
+  # So restaurant photos don't reload every time you scroll.
+  cached_network_image: ^3.3.1
+
+  # ── Environment Variables ─────────────────────────────
+  # Keeps secret keys (Supabase URL, API keys) out of your code.
+  # You never push secret keys to GitHub.
+  flutter_dotenv: ^5.1.0
+
+  # ── Icons ─────────────────────────────────────────────
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+
+  # ── Code Generation ───────────────────────────────────
+  # These run in the terminal to auto-generate code.
+  # You write a simple class, run build_runner,
+  # and it generates all the repetitive boilerplate for you.
+  build_runner: ^2.4.11
+  freezed: ^2.5.2
+  json_serializable: ^6.8.0
+  riverpod_generator: ^2.4.0
+
+  # ── Code Quality ──────────────────────────────────────
+  # Catches bad code, unused variables, and style issues.
+  # PDF Section 19 — part of our CI/CD pipeline later.
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+
+  # This is where we'll add fonts and image assets later
+  # assets:
+  #   - assets/images/
+  #   - .env
