@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/constants/dummy_data.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/app_typography.dart';
+import '../../../shared/widgets/app_side_menu.dart';
+import '../../../shared/widgets/glass_bottom_nav.dart';
 import '../domain/models/category_model.dart';
 import '../domain/models/food_item_model.dart';
-import '../domain/models/restaurant_model.dart';
 import 'widgets/category_section.dart';
 import 'widgets/home_app_bar.dart';
 import 'widgets/home_search_bar.dart';
@@ -13,33 +14,58 @@ import 'widgets/nearby_restaurants_section.dart';
 import 'widgets/popular_foods_section.dart';
 import 'widgets/promo_banner_slider.dart';
 
-// The main home screen.
-// Uses CustomScrollView with Slivers for smooth performance.
-// CustomScrollView lets us mix different scroll behaviors —
-// the app bar floats, the rest scrolls normally.
-
-class HomeScreen extends StatefulWidget {
+class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
 
   @override
-  State<HomeScreen> createState() => _HomeScreenState();
+  ConsumerState<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
-  // Cart item count — will come from Riverpod provider later
+class _HomeScreenState extends ConsumerState<HomeScreen>
+    with SingleTickerProviderStateMixin {
   int _cartItemCount = 0;
-
-  // Currently selected bottom nav index
   int _currentNavIndex = 0;
-
-  // Selected category filter — null means show all
   CategoryModel? _selectedCategory;
+  bool _menuOpen = false;
+
+  late AnimationController _menuController;
+  late Animation<Offset> _menuSlideAnimation;
+
+  @override
+  void initState() {
+    super.initState();
+    _menuController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _menuSlideAnimation = Tween<Offset>(
+      begin: const Offset(1.0, 0.0),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(
+      parent: _menuController,
+      curve: Curves.easeOutCubic,
+    ));
+  }
+
+  @override
+  void dispose() {
+    _menuController.dispose();
+    super.dispose();
+  }
+
+  void _openMenu() {
+    setState(() => _menuOpen = true);
+    _menuController.forward();
+  }
+
+  void _closeMenu() {
+    _menuController.reverse().then((_) {
+      if (mounted) setState(() => _menuOpen = false);
+    });
+  }
 
   void _onAddToCart(FoodItemModel item) {
-    setState(() {
-      _cartItemCount++;
-    });
-    // Show a snackbar confirmation
+    setState(() => _cartItemCount++);
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
         content: Text('${item.name} added to cart'),
@@ -56,103 +82,65 @@ class _HomeScreenState extends State<HomeScreen> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: AppColors.background,
-
-      // CustomScrollView lets us use Slivers.
-      // Slivers are scroll-aware widgets that can have
-      // special behaviors like floating app bars.
-      body: CustomScrollView(
-        slivers: [
-
-          // ── App Bar ───────────────────────────────────────
-          HomeAppBar(
-            cartItemCount: _cartItemCount,
-            onNotificationTap: () {},
-            onCartTap: () {},
+      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
+      extendBody: true,
+      body: Stack(
+        children: [
+          CustomScrollView(
+            slivers: [
+              HomeAppBar(
+                cartItemCount: _cartItemCount,
+                onNotificationTap: () {},
+                onCartTap: () {},
+              ),
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const SizedBox(height: AppSpacing.sm),
+                    HomeSearchBar(onTap: () {}),
+                    const SizedBox(height: AppSpacing.md),
+                    PromoBannerSlider(banners: DummyData.promoBanners),
+                    const SizedBox(height: AppSpacing.lg),
+                    CategorySection(
+                      onCategorySelected: (category) =>
+                          setState(() => _selectedCategory = category),
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    NearbyRestaurantsSection(
+                      restaurants: DummyData.restaurants,
+                      onRestaurantTap: (restaurant) {},
+                    ),
+                    const SizedBox(height: AppSpacing.lg),
+                    PopularFoodsSection(
+                      items: DummyData.popularItems,
+                      onAddToCart: _onAddToCart,
+                    ),
+                    const SizedBox(height: 100),
+                  ],
+                ),
+              ),
+            ],
           ),
-
-          // SliverToBoxAdapter wraps regular (non-sliver) widgets
-          // so they can live inside a CustomScrollView.
-          // Everything below the app bar is wrapped in this.
-          SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-
-                const SizedBox(height: AppSpacing.sm),
-
-                // ── Search Bar ──────────────────────────────
-                HomeSearchBar(onTap: () {}),
-
-                const SizedBox(height: AppSpacing.md),
-
-                // ── Promo Banner Slider ─────────────────────
-                PromoBannerSlider(banners: DummyData.promoBanners),
-
-                const SizedBox(height: AppSpacing.lg),
-
-                // ── Categories ──────────────────────────────
-                CategorySection(
-                  onCategorySelected: (category) {
-                    setState(() => _selectedCategory = category);
-                  },
-                ),
-
-                const SizedBox(height: AppSpacing.lg),
-
-                // ── Nearby Restaurants ──────────────────────
-                NearbyRestaurantsSection(
-                  restaurants: DummyData.restaurants,
-                  onRestaurantTap: (restaurant) {},
-                ),
-
-                const SizedBox(height: AppSpacing.lg),
-
-                // ── Popular Foods ───────────────────────────
-                PopularFoodsSection(
-                  items: DummyData.popularItems,
-                  onAddToCart: _onAddToCart,
-                ),
-
-                // Bottom padding so last item isn't hidden by nav bar
-                const SizedBox(height: AppSpacing.xxl),
-              ],
+          if (_menuOpen)
+            SlideTransition(
+              position: _menuSlideAnimation,
+              child: AppSideMenu(
+                onLoginTap: _closeMenu,
+                onClose: _closeMenu,
+              ),
             ),
-          ),
         ],
       ),
-
-      // ── Bottom Navigation Bar ────────────────────────────
-      bottomNavigationBar: BottomNavigationBar(
+      bottomNavigationBar: GlassBottomNav(
         currentIndex: _currentNavIndex,
-        onTap: (index) => setState(() => _currentNavIndex = index),
-        type: BottomNavigationBarType.fixed,
-        backgroundColor: AppColors.white,
-        selectedItemColor: AppColors.primary,
-        unselectedItemColor: AppColors.textHint,
-        selectedFontSize: 11,
-        unselectedFontSize: 11,
-        items: const [
-          BottomNavigationBarItem(
-            icon: Icon(Icons.home_outlined),
-            activeIcon: Icon(Icons.home_rounded),
-            label: 'Home',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.receipt_long_outlined),
-            activeIcon: Icon(Icons.receipt_long_rounded),
-            label: 'Orders',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.chat_bubble_outline_rounded),
-            activeIcon: Icon(Icons.chat_bubble_rounded),
-            label: 'Messages',
-          ),
-          BottomNavigationBarItem(
-            icon: Icon(Icons.menu_rounded),
-            label: 'Menu',
-          ),
-        ],
+        onTap: (index) {
+          if (index == 3) {
+            _openMenu();
+            return;
+          }
+          setState(() => _currentNavIndex = index);
+        },
       ),
     );
   }

@@ -86,4 +86,9 @@ class AppColors {
   // Like the dark layer over a restaurant's cover photo.
   static const Color overlay30 = Color(0x4D000000); // 30% black
   static const Color overlay60 = Color(0x99000000); // 60% black
+// ── Glass Colors ──────────────────────────────────────
+  static const Color glassLight = Color(0xCCFFFFFF);   // light mode glass
+  static const Color glassDark  = Color(0x1AFFFFFF);   // dark mode glass
+  static const Color glassBorderLight = Color(0xB3FFFFFF);
+  static const Color glassBorderDark  = Color(0x26FFFFFF);
 }
