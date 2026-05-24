@@ -1,27 +1,38 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../core/router/route_names.dart';
 import '../../core/theme/app_colors.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import '../../features/auth/application/auth_provider.dart';
+import '../../features/auth/domain/models/user_model.dart';
 import '../providers/theme_provider.dart';
 
 class AppSideMenu extends ConsumerWidget {
-  final VoidCallback onLoginTap;
   final VoidCallback onClose;
-  final bool isLoggedIn;
 
   const AppSideMenu({
     super.key,
-    required this.onLoginTap,
     required this.onClose,
-    this.isLoggedIn = false,
   });
+
+  void _navigate(BuildContext context, String path) {
+    onClose();
+    Future.delayed(
+      const Duration(milliseconds: 300),
+          () {
+        if (context.mounted) context.go(path);
+      },
+    );
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final themeMode = ref.watch(themeNotifierProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
+    final user = ref.watch(authStateProvider).valueOrNull;
 
     return GestureDetector(
       onTap: onClose,
@@ -64,7 +75,9 @@ class AppSideMenu extends ConsumerWidget {
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          _buildHeader(context),
+                          user != null
+                              ? _buildLoggedInHeader(context, ref, user)
+                              : _buildGuestHeader(context),
                           const Divider(height: 1),
                           Expanded(
                             child: SingleChildScrollView(
@@ -79,6 +92,20 @@ class AppSideMenu extends ConsumerWidget {
                                       label: 'Home',
                                       onTap: onClose,
                                     ),
+                                    if (user != null) ...[
+                                      _MenuItem(
+                                        icon: Icons.receipt_long_outlined,
+                                        label: 'My Orders',
+                                        onTap: () => _navigate(
+                                            context, RouteNames.orders),
+                                      ),
+                                      _MenuItem(
+                                        icon: Icons.person_outline_rounded,
+                                        label: 'My Profile',
+                                        onTap: () => _navigate(
+                                            context, RouteNames.profile),
+                                      ),
+                                    ],
                                     _MenuItem(
                                       icon: Icons.location_on_outlined,
                                       label: 'My Addresses',
@@ -92,8 +119,7 @@ class AppSideMenu extends ConsumerWidget {
                                   ]),
                                   const Divider(height: 1),
                                   const SizedBox(height: AppSpacing.sm),
-                                  _buildThemeSelector(
-                                      context, ref, themeMode),
+                                  _buildThemeSelector(context, ref, themeMode),
                                   const Divider(height: 1),
                                   _buildSection([
                                     _MenuItem(
@@ -117,16 +143,20 @@ class AppSideMenu extends ConsumerWidget {
                                       onTap: () {},
                                     ),
                                   ]),
-
-                                  // Logout only shows when logged in
-                                  if (isLoggedIn) ...[
+                                  if (user != null) ...[
                                     const Divider(height: 1),
                                     _buildSection([
                                       _MenuItem(
                                         icon: Icons.logout_rounded,
                                         label: 'Logout',
                                         color: AppColors.error,
-                                        onTap: () {},
+                                        onTap: () async {
+                                          onClose();
+                                          await ref
+                                              .read(
+                                              authNotifierProvider.notifier)
+                                              .signOut();
+                                        },
                                       ),
                                     ]),
                                   ],
@@ -148,29 +178,13 @@ class AppSideMenu extends ConsumerWidget {
     );
   }
 
-  Widget _buildHeader(BuildContext context) {
+  Widget _buildGuestHeader(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: AppColors.primary,
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: const Icon(Icons.restaurant_rounded,
-                    color: AppColors.white, size: 22),
-              ),
-              const SizedBox(width: AppSpacing.sm),
-              const Text('Khaja Attariya',
-                  style: AppTypography.headingSmall),
-            ],
-          ),
+          _buildLogo(),
           const SizedBox(height: AppSpacing.lg),
           Container(
             width: double.infinity,
@@ -195,9 +209,10 @@ class AppSideMenu extends ConsumerWidget {
                 ),
                 const SizedBox(height: AppSpacing.md),
                 SizedBox(
+                  width: double.infinity,
                   height: 40,
                   child: ElevatedButton(
-                    onPressed: onLoginTap,
+                    onPressed: () => _navigate(context, RouteNames.login),
                     style: ElevatedButton.styleFrom(
                       minimumSize: Size.zero,
                       padding: const EdgeInsets.symmetric(
@@ -211,6 +226,99 @@ class AppSideMenu extends ConsumerWidget {
           ),
         ],
       ),
+    );
+  }
+
+  Widget _buildLoggedInHeader(
+      BuildContext context, WidgetRef ref, UserModel user) {
+    return Padding(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          _buildLogo(),
+          const SizedBox(height: AppSpacing.lg),
+          Row(
+            children: [
+              CircleAvatar(
+                radius: 26,
+                backgroundColor: AppColors.primary.withOpacity(0.15),
+                backgroundImage: user.avatarUrl != null
+                    ? NetworkImage(user.avatarUrl!)
+                    : null,
+                child: user.avatarUrl == null
+                    ? Text(
+                  user.fullName.isNotEmpty
+                      ? user.fullName[0].toUpperCase()
+                      : '?',
+                  style: AppTypography.headingSmall
+                      .copyWith(color: AppColors.primary),
+                )
+                    : null,
+              ),
+              const SizedBox(width: AppSpacing.md),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      user.fullName,
+                      style: AppTypography.bodyLarge,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      user.email,
+                      style: AppTypography.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: AppSpacing.xs),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: AppSpacing.sm,
+                        vertical: 2,
+                      ),
+                      decoration: BoxDecoration(
+                        color: AppColors.primary.withOpacity(0.1),
+                        borderRadius:
+                        BorderRadius.circular(AppSpacing.radiusSm),
+                      ),
+                      child: Text(
+                        user.role.toUpperCase(),
+                        style: AppTypography.labelSmall.copyWith(
+                          color: AppColors.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildLogo() {
+    return Row(
+      children: [
+        Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: AppColors.primary,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: const Icon(Icons.restaurant_rounded,
+              color: AppColors.white, size: 22),
+        ),
+        const SizedBox(width: AppSpacing.sm),
+        const Text('Khaja Attariya', style: AppTypography.headingSmall),
+      ],
     );
   }
 
@@ -342,14 +450,12 @@ class _ThemeOption extends StatelessWidget {
             children: [
               Icon(icon,
                   size: 20,
-                  color:
-                  isSelected ? AppColors.white : AppColors.primary),
+                  color: isSelected ? AppColors.white : AppColors.primary),
               const SizedBox(height: 4),
               Text(
                 label,
                 style: AppTypography.labelSmall.copyWith(
-                  color:
-                  isSelected ? AppColors.white : AppColors.primary,
+                  color: isSelected ? AppColors.white : AppColors.primary,
                 ),
               ),
             ],

@@ -26,6 +26,10 @@ class AuthRepositoryImpl implements AuthRepository {
       throw Exception('Sign up failed. Please try again.');
     }
 
+    if (response.session == null) {
+      throw Exception('Please confirm your email then log in.');
+    }
+
     // Wait a moment for the trigger to create the profile
     await Future.delayed(const Duration(milliseconds: 500));
 

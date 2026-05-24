@@ -1,15 +1,12 @@
 import 'package:flutter/material.dart';
-import '../../../../core/constants/dummy_data.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
 import '../../../../core/theme/app_typography.dart';
+import '../../application/restaurant_provider.dart';
 import '../../domain/models/category_model.dart';
 
-// Horizontal scrollable row of food categories.
-// Momo, Thali, Chowmein, Pizza, Burger etc.
-// Tapping a category filters the restaurants and food items.
-
-class CategorySection extends StatefulWidget {
+class CategorySection extends ConsumerStatefulWidget {
   final Function(CategoryModel?) onCategorySelected;
 
   const CategorySection({
@@ -18,20 +15,19 @@ class CategorySection extends StatefulWidget {
   });
 
   @override
-  State<CategorySection> createState() => _CategorySectionState();
+  ConsumerState<CategorySection> createState() => _CategorySectionState();
 }
 
-class _CategorySectionState extends State<CategorySection> {
-  // Tracks which category is currently selected.
-  // null means "All" — no filter applied.
+class _CategorySectionState extends ConsumerState<CategorySection> {
   String? _selectedId;
 
   @override
   Widget build(BuildContext context) {
+    final categoriesAsync = ref.watch(categoriesProvider);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Section title
         Padding(
           padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.screenHorizontal,
@@ -39,39 +35,42 @@ class _CategorySectionState extends State<CategorySection> {
           child: const Text('Categories', style: AppTypography.headingSmall),
         ),
         const SizedBox(height: AppSpacing.sm),
-
-        // Horizontal scrollable list
         SizedBox(
           height: 90,
-          child: ListView.builder(
-            // Horizontal scroll direction
-            scrollDirection: Axis.horizontal,
-            // Padding on left and right of the whole list
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.screenHorizontal,
+          child: categoriesAsync.when(
+            loading: () => const Center(
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: AppColors.primary,
+              ),
             ),
-            itemCount: DummyData.categories.length,
-            itemBuilder: (context, index) {
-              final category = DummyData.categories[index];
-              final isSelected = _selectedId == category.id;
-
-              return _CategoryChip(
-                category: category,
-                isSelected: isSelected,
-                onTap: () {
-                  setState(() {
-                    // If already selected, deselect it (show all)
-                    if (_selectedId == category.id) {
-                      _selectedId = null;
-                      widget.onCategorySelected(null);
-                    } else {
-                      _selectedId = category.id;
-                      widget.onCategorySelected(category);
-                    }
-                  });
-                },
-              );
-            },
+            error: (_, __) => const SizedBox.shrink(),
+            data: (categories) => ListView.builder(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.screenHorizontal,
+              ),
+              itemCount: categories.length,
+              itemBuilder: (context, index) {
+                final category = categories[index];
+                final isSelected = _selectedId == category.id;
+                return _CategoryChip(
+                  category: category,
+                  isSelected: isSelected,
+                  onTap: () {
+                    setState(() {
+                      if (_selectedId == category.id) {
+                        _selectedId = null;
+                        widget.onCategorySelected(null);
+                      } else {
+                        _selectedId = category.id;
+                        widget.onCategorySelected(category);
+                      }
+                    });
+                  },
+                );
+              },
+            ),
           ),
         ),
       ],
@@ -79,7 +78,6 @@ class _CategorySectionState extends State<CategorySection> {
   }
 }
 
-// A single category chip
 class _CategoryChip extends StatelessWidget {
   final CategoryModel category;
   final bool isSelected;
@@ -99,13 +97,11 @@ class _CategoryChip extends StatelessWidget {
         padding: const EdgeInsets.only(right: AppSpacing.sm),
         child: Column(
           children: [
-            // Icon circle
             AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               width: 56,
               height: 56,
               decoration: BoxDecoration(
-                // Selected = red background, unselected = light surface
                 color: isSelected ? AppColors.primary : AppColors.surface,
                 shape: BoxShape.circle,
                 border: Border.all(
@@ -121,16 +117,14 @@ class _CategoryChip extends StatelessWidget {
               ),
             ),
             const SizedBox(height: AppSpacing.xs),
-            // Category name
             Text(
               category.name,
               style: AppTypography.bodySmall.copyWith(
                 color: isSelected
                     ? AppColors.primary
                     : AppColors.textSecondary,
-                fontWeight: isSelected
-                    ? FontWeight.w600
-                    : FontWeight.w400,
+                fontWeight:
+                isSelected ? FontWeight.w600 : FontWeight.w400,
               ),
             ),
           ],

@@ -20,6 +20,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
   final _passwordController = TextEditingController();
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -30,6 +31,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   Future<void> _login() async {
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _isLoading = true);
 
     await ref.read(authNotifierProvider.notifier).signIn(
       email: _emailController.text.trim(),
@@ -37,31 +39,28 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
     );
 
     if (!mounted) return;
+    setState(() => _isLoading = false);
 
-    final state = ref.read(authNotifierProvider);
-    state.when(
+    final authState = ref.read(authNotifierProvider);
+    authState.whenOrNull(
       data: (user) {
         if (user != null) {
           switch (user.role) {
             case 'restaurant':
               context.go(RouteNames.restaurantDashboard);
-              break;
             case 'rider':
               context.go(RouteNames.riderDashboard);
-              break;
             case 'admin':
               context.go(RouteNames.adminDashboard);
-              break;
             default:
               context.go(RouteNames.home);
           }
         }
       },
-      loading: () {},
       error: (e, _) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString()),
+            content: Text(e.toString().replaceAll('Exception: ', '')),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
@@ -72,9 +71,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authNotifierProvider);
-    final isLoading = authState.isLoading;
-
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -87,26 +83,20 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const SizedBox(height: AppSpacing.xxl),
-
-                // Back button
                 IconButton(
                   onPressed: () => context.go(RouteNames.home),
                   icon: const Icon(Icons.arrow_back_rounded),
                   padding: EdgeInsets.zero,
                 ),
-
                 const SizedBox(height: AppSpacing.lg),
-
-                // Header
-                const Text('Welcome back 👋', style: AppTypography.displayMedium),
+                const Text('Welcome back 👋',
+                    style: AppTypography.displayMedium),
                 const SizedBox(height: AppSpacing.sm),
                 Text(
                   'Sign in to order your favourite food',
                   style: AppTypography.bodyMedium,
                 ),
-
                 const SizedBox(height: AppSpacing.xl),
-
                 AppTextField(
                   label: 'Email',
                   hint: 'you@example.com',
@@ -119,9 +109,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     return null;
                   },
                 ),
-
                 const SizedBox(height: AppSpacing.md),
-
                 AppTextField(
                   label: 'Password',
                   hint: '••••••••',
@@ -130,14 +118,12 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                   prefixIcon: Icons.lock_outline_rounded,
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Password is required';
-                    if (v.length < 6) return 'Password must be at least 6 characters';
+                    if (v.length < 6)
+                      return 'Password must be at least 6 characters';
                     return null;
                   },
                 ),
-
                 const SizedBox(height: AppSpacing.sm),
-
-                // Forgot password
                 Align(
                   alignment: Alignment.centerRight,
                   child: TextButton(
@@ -145,18 +131,13 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     child: const Text('Forgot Password?'),
                   ),
                 ),
-
                 const SizedBox(height: AppSpacing.lg),
-
                 AppButton(
                   label: 'Login',
-                  isLoading: isLoading,
+                  isLoading: _isLoading,
                   onPressed: _login,
                 ),
-
                 const SizedBox(height: AppSpacing.lg),
-
-                // Sign up link
                 Row(
                   mainAxisAlignment: MainAxisAlignment.center,
                   children: [
@@ -168,7 +149,6 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                     ),
                   ],
                 ),
-
                 const SizedBox(height: AppSpacing.xl),
               ],
             ),
