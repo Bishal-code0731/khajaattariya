@@ -24,6 +24,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
   String _selectedRole = 'customer';
+  bool _isLoading = false;
 
   @override
   void dispose() {
@@ -35,8 +36,30 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     super.dispose();
   }
 
+  // Returns emoji + subtitle based on selected role
+  ({String emoji, String subtitle}) get _roleHeader {
+    switch (_selectedRole) {
+      case 'restaurant':
+        return (
+        emoji: '🍽️',
+        subtitle: 'Partner with Khaja Attariya and grow your restaurant business',
+        );
+      case 'rider':
+        return (
+        emoji: '🛵',
+        subtitle: 'Deliver food across Attariya and earn on your schedule',
+        );
+      default:
+        return (
+        emoji: '🎉',
+        subtitle: 'Join Khaja Attariya and order your favourite food',
+        );
+    }
+  }
+
   Future<void> _signUp() async {
     if (!_formKey.currentState!.validate()) return;
+    setState(() => _isLoading = true);
 
     await ref.read(authNotifierProvider.notifier).signUp(
       email: _emailController.text.trim(),
@@ -47,17 +70,17 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     );
 
     if (!mounted) return;
+    setState(() => _isLoading = false);
 
-    final state = ref.read(authNotifierProvider);
-    state.when(
+    final authState = ref.read(authNotifierProvider);
+    authState.whenOrNull(
       data: (user) {
         if (user != null) context.go(RouteNames.home);
       },
-      loading: () {},
       error: (e, _) {
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
-            content: Text(e.toString()),
+            content: Text(e.toString().replaceAll('Exception: ', '')),
             backgroundColor: AppColors.error,
             behavior: SnackBarBehavior.floating,
           ),
@@ -68,8 +91,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final authState = ref.watch(authNotifierProvider);
-    final isLoading = authState.isLoading;
+    final header = _roleHeader;
 
     return Scaffold(
       body: SafeArea(
@@ -92,11 +114,24 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
                 const SizedBox(height: AppSpacing.lg),
 
-                const Text('Create Account 🎉', style: AppTypography.displayMedium),
-                const SizedBox(height: AppSpacing.sm),
-                Text(
-                  'Join Khaja Attariya and order your favourite food',
-                  style: AppTypography.bodyMedium,
+                // Emoji + title animate with role selection
+                AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 250),
+                  child: Column(
+                    key: ValueKey(_selectedRole),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Create Account ${header.emoji}',
+                        style: AppTypography.displayMedium,
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                      Text(
+                        header.subtitle,
+                        style: AppTypography.bodyMedium,
+                      ),
+                    ],
+                  ),
                 ),
 
                 const SizedBox(height: AppSpacing.xl),
@@ -162,14 +197,14 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   prefixIcon: Icons.lock_outline_rounded,
                   validator: (v) {
                     if (v == null || v.isEmpty) return 'Please confirm password';
-                    if (v != _passwordController.text) return 'Passwords do not match';
+                    if (v != _passwordController.text)
+                      return 'Passwords do not match';
                     return null;
                   },
                 ),
 
                 const SizedBox(height: AppSpacing.lg),
 
-                // Role selection
                 Text('I want to join as', style: AppTypography.headingSmall),
                 const SizedBox(height: AppSpacing.sm),
                 _RoleSelector(
@@ -181,7 +216,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
 
                 AppButton(
                   label: 'Create Account',
-                  isLoading: isLoading,
+                  isLoading: _isLoading,
                   onPressed: _signUp,
                 ),
 

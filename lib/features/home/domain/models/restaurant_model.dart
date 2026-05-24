@@ -1,18 +1,15 @@
-// A Restaurant is one food place listed on the home screen.
-// Contains everything needed to show the restaurant card.
-
 class RestaurantModel {
   final String id;
   final String name;
   final String imageUrl;
-  final String cuisineType;    // "Nepali, Chinese"
-  final double rating;         // 4.5
-  final int reviewCount;       // 120 reviews
-  final int deliveryTimeMin;   // 20 minutes
-  final double deliveryFee;    // Rs. 30
-  final bool isOpen;           // is the restaurant open right now
-  final bool isFeatured;       // show featured badge
-  final String? offer;         // "20% off" — null if no offer
+  final String cuisineType;
+  final double rating;
+  final int reviewCount;
+  final int deliveryTimeMin;
+  final double deliveryFee;
+  final bool isOpen;
+  final bool isFeatured;
+  final String? offer;
 
   const RestaurantModel({
     required this.id,
@@ -27,4 +24,20 @@ class RestaurantModel {
     this.isFeatured = false,
     this.offer,
   });
+
+  factory RestaurantModel.fromMap(Map<String, dynamic> map) {
+    return RestaurantModel(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      imageUrl: map['image_url'] as String? ?? '',
+      cuisineType: map['cuisine_type'] as String,
+      rating: (map['rating'] as num).toDouble(),
+      reviewCount: map['review_count'] as int,
+      deliveryTimeMin: map['delivery_time_min'] as int,
+      deliveryFee: (map['delivery_fee'] as num).toDouble(),
+      isOpen: map['is_open'] as bool,
+      isFeatured: map['is_featured'] as bool? ?? false,
+      offer: map['offer'] as String?,
+    );
+  }
 }

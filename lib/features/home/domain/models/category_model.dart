@@ -1,12 +1,8 @@
-// A Category is one food type shown in the horizontal scroll.
-// For example: Momo, Thali, Chowmein, Pizza, Burger.
-// Every category has an id, name, and an emoji icon.
-
 class CategoryModel {
   final String id;
   final String name;
-  final String emoji;    // We use emoji for now, real icons later
-  final String? imageUrl; // Optional — for when we have real images
+  final String emoji;
+  final String? imageUrl;
 
   const CategoryModel({
     required this.id,
@@ -14,4 +10,13 @@ class CategoryModel {
     required this.emoji,
     this.imageUrl,
   });
+
+  factory CategoryModel.fromMap(Map<String, dynamic> map) {
+    return CategoryModel(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      emoji: map['emoji'] as String,
+      imageUrl: map['image_url'] as String?,
+    );
+  }
 }
