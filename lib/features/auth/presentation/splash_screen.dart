@@ -1,19 +1,15 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
-import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_typography.dart';
-import '../application/auth_provider.dart';
 
-class SplashScreen extends ConsumerStatefulWidget {
+class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
   @override
-  ConsumerState<SplashScreen> createState() => _SplashScreenState();
+  State<SplashScreen> createState() => _SplashScreenState();
 }
 
-class _SplashScreenState extends ConsumerState<SplashScreen>
+class _SplashScreenState extends State<SplashScreen>
     with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<double> _fadeAnimation;
@@ -22,11 +18,6 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
   @override
   void initState() {
     super.initState();
-    _setupAnimation();
-    _navigate();
-  }
-
-  void _setupAnimation() {
     _controller = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1200),
@@ -44,35 +35,8 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       ),
     );
     _controller.forward();
-  }
-
-  Future<void> _navigate() async {
-    await Future.delayed(const Duration(milliseconds: 2500));
-    if (!mounted) return;
-
-    // Check if user is already logged in
-    final user = await ref.read(authRepositoryProvider).getCurrentUser();
-
-    if (!mounted) return;
-
-    if (user != null) {
-      // Route by role
-      switch (user.role) {
-        case 'restaurant':
-          context.go(RouteNames.restaurantDashboard);
-          break;
-        case 'rider':
-          context.go(RouteNames.riderDashboard);
-          break;
-        case 'admin':
-          context.go(RouteNames.adminDashboard);
-          break;
-        default:
-          context.go(RouteNames.home);
-      }
-    } else {
-      context.go(RouteNames.home);
-    }
+    // No manual navigation — router redirect handles it
+    // once authStateProvider emits the first value
   }
 
   @override
@@ -88,12 +52,10 @@ class _SplashScreenState extends ConsumerState<SplashScreen>
       body: Center(
         child: AnimatedBuilder(
           animation: _controller,
-          builder: (context, child) {
-            return FadeTransition(
-              opacity: _fadeAnimation,
-              child: ScaleTransition(scale: _scaleAnimation, child: child),
-            );
-          },
+          builder: (context, child) => FadeTransition(
+            opacity: _fadeAnimation,
+            child: ScaleTransition(scale: _scaleAnimation, child: child),
+          ),
           child: Column(
             mainAxisAlignment: MainAxisAlignment.center,
             children: [

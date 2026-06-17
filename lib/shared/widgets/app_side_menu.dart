@@ -58,16 +58,16 @@ class AppSideMenu extends ConsumerWidget {
                     height: double.infinity,
                     decoration: BoxDecoration(
                       color: isDark
-                          ? Colors.white.withOpacity(0.08)
-                          : Colors.white.withOpacity(0.85),
+                          ? Colors.white.withValues(alpha: 0.08)
+                          : Colors.white.withValues(alpha: 0.85),
                       borderRadius: const BorderRadius.only(
                         topLeft: Radius.circular(28),
                         bottomLeft: Radius.circular(28),
                       ),
                       border: Border.all(
                         color: isDark
-                            ? Colors.white.withOpacity(0.12)
-                            : Colors.white.withOpacity(0.6),
+                            ? Colors.white.withValues(alpha: 0.12)
+                            : Colors.white.withValues(alpha: 0.6),
                         width: 1,
                       ),
                     ),
@@ -100,26 +100,35 @@ class AppSideMenu extends ConsumerWidget {
                                             context, RouteNames.orders),
                                       ),
                                       _MenuItem(
+                                        icon: Icons.notifications_outlined,
+                                        label: 'Notifications',
+                                        onTap: () => _navigate(
+                                            context, RouteNames.notifications),
+                                      ),
+                                      _MenuItem(
                                         icon: Icons.person_outline_rounded,
                                         label: 'My Profile',
                                         onTap: () => _navigate(
                                             context, RouteNames.profile),
                                       ),
+                                      _MenuItem(
+                                        icon: Icons.location_on_outlined,
+                                        label: 'My Addresses',
+                                        onTap: () => _navigate(
+                                            context, RouteNames.addressBook),
+                                      ),
+                                      _MenuItem(
+                                        icon: Icons.favorite_outline_rounded,
+                                        label: 'Saved Restaurants',
+                                        onTap: () => _navigate(
+                                            context, RouteNames.favorites),
+                                      ),
                                     ],
-                                    _MenuItem(
-                                      icon: Icons.location_on_outlined,
-                                      label: 'My Addresses',
-                                      onTap: () {},
-                                    ),
-                                    _MenuItem(
-                                      icon: Icons.favorite_outline_rounded,
-                                      label: 'Saved Items',
-                                      onTap: () {},
-                                    ),
                                   ]),
                                   const Divider(height: 1),
                                   const SizedBox(height: AppSpacing.sm),
-                                  _buildThemeSelector(context, ref, themeMode),
+                                  _buildThemeSelector(
+                                      context, ref, themeMode),
                                   const Divider(height: 1),
                                   _buildSection([
                                     _MenuItem(
@@ -153,8 +162,8 @@ class AppSideMenu extends ConsumerWidget {
                                         onTap: () async {
                                           onClose();
                                           await ref
-                                              .read(
-                                              authNotifierProvider.notifier)
+                                              .read(authNotifierProvider
+                                              .notifier)
                                               .signOut();
                                         },
                                       ),
@@ -190,10 +199,10 @@ class AppSideMenu extends ConsumerWidget {
             width: double.infinity,
             padding: const EdgeInsets.all(AppSpacing.md),
             decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.08),
+              color: AppColors.primary.withValues(alpha: 0.08),
               borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
               border: Border.all(
-                color: AppColors.primary.withOpacity(0.2),
+                color: AppColors.primary.withValues(alpha: 0.2),
                 width: 1,
               ),
             ),
@@ -242,7 +251,7 @@ class AppSideMenu extends ConsumerWidget {
             children: [
               CircleAvatar(
                 radius: 26,
-                backgroundColor: AppColors.primary.withOpacity(0.15),
+                backgroundColor: AppColors.primary.withValues(alpha: 0.15),
                 backgroundImage: user.avatarUrl != null
                     ? NetworkImage(user.avatarUrl!)
                     : null,
@@ -281,7 +290,7 @@ class AppSideMenu extends ConsumerWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withOpacity(0.1),
+                        color: AppColors.primary.withValues(alpha: 0.1),
                         borderRadius:
                         BorderRadius.circular(AppSpacing.radiusSm),
                       ),
@@ -438,12 +447,12 @@ class _ThemeOption extends StatelessWidget {
           decoration: BoxDecoration(
             color: isSelected
                 ? AppColors.primary
-                : AppColors.primary.withOpacity(0.08),
+                : AppColors.primary.withValues(alpha: 0.08),
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
             border: Border.all(
               color: isSelected
                   ? AppColors.primary
-                  : AppColors.primary.withOpacity(0.2),
+                  : AppColors.primary.withValues(alpha: 0.2),
             ),
           ),
           child: Column(
