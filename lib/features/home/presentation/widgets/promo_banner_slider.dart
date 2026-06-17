@@ -117,7 +117,7 @@ class _BannerCard extends StatelessWidget {
       child: Container(
         decoration: BoxDecoration(
           // Each banner has its own color from dummy data
-          color: Color(banner['color'] as int),
+          color: Color(int.parse('FF${banner['color_hex']}', radix: 16)),
           borderRadius: BorderRadius.circular(AppSpacing.radiusLg),
         ),
         padding: const EdgeInsets.all(AppSpacing.md),

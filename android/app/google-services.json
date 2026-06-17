@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1085770935101",
+    "project_id": "khajaattariya-app",
+    "storage_bucket": "khajaattariya-app.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1085770935101:android:a7bd04db37c4ccf9853354",
+        "android_client_info": {
+          "package_name": "com.khajaattariya.khajaattariya"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAsTqSEr1kg_2llSrVGiLmL9GRx3DiL8RQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

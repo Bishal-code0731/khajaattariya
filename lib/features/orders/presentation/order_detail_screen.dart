@@ -1,357 +1,164 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../features/orders/application/order_provider.dart';
+import '../../../features/orders/domain/models/order_model.dart';
 import '../../../shared/widgets/glass_card.dart';
-import '../application/order_provider.dart';
-import '../domain/models/order_model.dart';
+import '../../../shared/order_timeline_provider.dart';
 
 class OrderDetailScreen extends ConsumerWidget {
   final String orderId;
-
   const OrderDetailScreen({super.key, required this.orderId});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final orderAsync = ref.watch(orderByIdProvider(orderId));
+    final orderAsync    = ref.watch(orderStreamProvider(orderId));
+    final timelineAsync = ref.watch(orderTimelineProvider(orderId));
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
       appBar: AppBar(
-        title: const Text('Order Details'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go(RouteNames.orders),
-        ),
+        title: Text('Order #${orderId.substring(0, 8).toUpperCase()}'),
+        leading: IconButton(icon: const Icon(Icons.arrow_back_rounded), onPressed: () => context.pop()),
       ),
       body: orderAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-        error: (_, __) => const Center(
-          child: Text('Could not load order details'),
-        ),
-        data: (order) => SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.screenHorizontal,
-            vertical: AppSpacing.md,
-          ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
+        loading: () => const Center(child: CircularProgressIndicator(color: AppColors.primary)),
+        error: (_, __) => const Center(child: Text('Could not load order')),
+        data: (order) {
+          if (order == null) return const Center(child: Text('Order not found'));
+          return ListView(
+            padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
             children: [
-              _StatusTracker(status: order.status),
-              const SizedBox(height: AppSpacing.lg),
-              _RestaurantInfo(order: order),
-              const SizedBox(height: AppSpacing.lg),
-              _ItemsList(order: order),
-              const SizedBox(height: AppSpacing.lg),
-              _BillSummary(order: order),
-              const SizedBox(height: AppSpacing.lg),
-              if (order.deliveryAddress != null)
-                _InfoTile(
-                  icon: Icons.location_on_outlined,
-                  label: 'Delivery Address',
-                  value: order.deliveryAddress!,
-                ),
-              if (order.notes != null)
-                _InfoTile(
-                  icon: Icons.note_outlined,
-                  label: 'Notes',
-                  value: order.notes!,
-                ),
-              _InfoTile(
-                icon: Icons.confirmation_number_outlined,
-                label: 'Order ID',
-                value: order.id.substring(0, 8).toUpperCase(),
+              GlassCard(
+                padding: const EdgeInsets.all(AppSpacing.md), borderRadius: AppSpacing.radiusLg,
+                child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+                    Text(order.restaurantName, style: AppTypography.headingSmall),
+                    _StatusChip(status: order.status),
+                  ]),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text('Placed on ${_fmt(order.createdAt)}', style: AppTypography.bodySmall),
+                ]),
               ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-class _StatusTracker extends StatelessWidget {
-  final OrderStatus status;
-
-  const _StatusTracker({required this.status});
-
-  static const _steps = [
-    OrderStatus.pending,
-    OrderStatus.confirmed,
-    OrderStatus.preparing,
-    OrderStatus.ready,
-    OrderStatus.pickedUp,
-    OrderStatus.delivered,
-  ];
-
-  @override
-  Widget build(BuildContext context) {
-    if (status == OrderStatus.cancelled) {
-      return GlassCard(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        borderRadius: AppSpacing.radiusLg,
-        child: Row(
-          children: [
-            const Icon(Icons.cancel_outlined, color: AppColors.error),
-            const SizedBox(width: AppSpacing.sm),
-            Text('Order Cancelled',
-                style: AppTypography.headingSmall
-                    .copyWith(color: AppColors.error)),
-          ],
-        ),
-      );
-    }
-
-    final currentIndex = _steps.indexOf(status);
-
-    return GlassCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      borderRadius: AppSpacing.radiusLg,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Order Status', style: AppTypography.headingSmall),
-          const SizedBox(height: AppSpacing.md),
-          Row(
-            children: List.generate(_steps.length * 2 - 1, (i) {
-              if (i.isOdd) {
-                // Connector line
-                final stepIndex = i ~/ 2;
-                final isCompleted = stepIndex < currentIndex;
-                return Expanded(
-                  child: Container(
-                    height: 2,
-                    color: isCompleted
-                        ? AppColors.primary
-                        : AppColors.border,
-                  ),
-                );
-              }
-              // Step dot
-              final stepIndex = i ~/ 2;
-              final isCompleted = stepIndex <= currentIndex;
-              return Container(
-                width: 24,
-                height: 24,
-                decoration: BoxDecoration(
-                  color: isCompleted ? AppColors.primary : AppColors.border,
-                  shape: BoxShape.circle,
-                ),
-                child: isCompleted
-                    ? const Icon(Icons.check_rounded,
-                    color: Colors.white, size: 14)
-                    : null,
-              );
-            }),
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Center(
-            child: Text(
-              status.label,
-              style: AppTypography.labelMedium
-                  .copyWith(color: AppColors.primary),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-class _RestaurantInfo extends StatelessWidget {
-  final OrderModel order;
-
-  const _RestaurantInfo({required this.order});
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      borderRadius: AppSpacing.radiusLg,
-      child: Row(
-        children: [
-          Container(
-            width: 44,
-            height: 44,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withOpacity(0.1),
-              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            ),
-            child: const Icon(Icons.store_rounded, color: AppColors.primary),
-          ),
-          const SizedBox(width: AppSpacing.md),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(order.restaurantName,
-                    style: AppTypography.headingSmall),
-                const SizedBox(height: 2),
-                Text(
-                  'Ordered on ${_formatDate(order.createdAt)}',
-                  style: AppTypography.bodySmall,
-                ),
-              ],
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  String _formatDate(DateTime dt) =>
-      '${dt.day}/${dt.month}/${dt.year} at ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
-}
-
-class _ItemsList extends StatelessWidget {
-  final OrderModel order;
-
-  const _ItemsList({required this.order});
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      borderRadius: AppSpacing.radiusLg,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Items', style: AppTypography.headingSmall),
-          const SizedBox(height: AppSpacing.sm),
-          ...order.items.map(
-                (item) => Padding(
-              padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-              child: Row(
-                children: [
-                  Text(
-                    '${item.quantity}×',
-                    style: AppTypography.labelMedium
-                        .copyWith(color: AppColors.primary),
-                  ),
+              const SizedBox(height: AppSpacing.md),
+              Text('Items', style: AppTypography.headingSmall),
+              const SizedBox(height: AppSpacing.sm),
+              ...order.items.map((item) => Padding(
+                padding: const EdgeInsets.only(bottom: AppSpacing.xs),
+                child: Row(children: [
+                  Text('${item.quantity}×', style: AppTypography.labelSmall.copyWith(color: AppColors.primary)),
                   const SizedBox(width: AppSpacing.sm),
-                  Expanded(
-                    child: Text(item.name, style: AppTypography.bodyMedium),
-                  ),
-                  Text(
-                    'Rs. ${item.subtotal.toInt()}',
-                    style: AppTypography.bodyMedium,
-                  ),
-                ],
+                  Expanded(child: Text(item.name, style: AppTypography.bodyMedium)),
+                  Text('Rs. ${(item.price * item.quantity).toInt()}', style: AppTypography.bodyMedium),
+                ]),
+              )),
+              const Divider(height: AppSpacing.lg),
+              _Row('Subtotal', 'Rs. ${(order.totalAmount - order.deliveryFee).toInt()}'),
+              _Row('Delivery Fee', 'Rs. ${order.deliveryFee.toInt()}'),
+              _Row('Total', 'Rs. ${order.totalAmount.toInt()}', bold: true),
+              if (order.deliveryAddress != null) ...[
+                const SizedBox(height: AppSpacing.md),
+                Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                  const Icon(Icons.location_on_outlined, size: 16, color: AppColors.primary),
+                  const SizedBox(width: AppSpacing.xs),
+                  Expanded(child: Text(order.deliveryAddress!, style: AppTypography.bodySmall)),
+                ]),
+              ],
+              const SizedBox(height: AppSpacing.lg),
+              Text('Order Timeline', style: AppTypography.headingSmall),
+              const SizedBox(height: AppSpacing.sm),
+              timelineAsync.when(
+                loading: () => const Padding(padding: EdgeInsets.all(AppSpacing.md),
+                    child: Center(child: CircularProgressIndicator(color: AppColors.primary, strokeWidth: 2))),
+                error: (_, __) => const SizedBox.shrink(),
+                data: (events) {
+                  if (events.isEmpty) return Text('No timeline events yet', style: AppTypography.bodySmall);
+                  return Column(children: events.asMap().entries
+                      .map((e) => _TimelineItem(event: e.value, isLast: e.key == events.length - 1))
+                      .toList());
+                },
               ),
-            ),
-          ),
-        ],
+              const SizedBox(height: AppSpacing.xl),
+            ],
+          );
+        },
       ),
     );
   }
+
+  String _fmt(DateTime dt) =>
+      '${dt.day}/${dt.month}/${dt.year} ${dt.hour}:${dt.minute.toString().padLeft(2, '0')}';
 }
 
-class _BillSummary extends StatelessWidget {
-  final OrderModel order;
+class _StatusChip extends StatelessWidget {
+  final OrderStatus status;
+  const _StatusChip({required this.status});
 
-  const _BillSummary({required this.order});
+  Color get _color {
+    switch (status) {
+      case OrderStatus.pending:   return AppColors.statusPending;
+      case OrderStatus.confirmed: return AppColors.statusConfirmed;
+      case OrderStatus.preparing: return AppColors.statusPreparing;
+      case OrderStatus.ready:     return AppColors.statusReady;
+      case OrderStatus.pickedUp:  return AppColors.statusDelivering;
+      case OrderStatus.delivered: return AppColors.statusDelivered;
+      case OrderStatus.cancelled: return AppColors.statusCancelled;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
-    final subtotal = order.totalAmount - order.deliveryFee;
-
-    return GlassCard(
-      padding: const EdgeInsets.all(AppSpacing.md),
-      borderRadius: AppSpacing.radiusLg,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Bill Summary', style: AppTypography.headingSmall),
-          const SizedBox(height: AppSpacing.sm),
-          _Row(label: 'Subtotal',
-              value: 'Rs. ${subtotal.toInt()}'),
-          const SizedBox(height: AppSpacing.xs),
-          _Row(label: 'Delivery fee',
-              value: 'Rs. ${order.deliveryFee.toInt()}'),
-          const Divider(height: AppSpacing.lg),
-          _Row(
-            label: 'Total',
-            value: 'Rs. ${order.totalAmount.toInt()}',
-            isTotal: true,
-          ),
-        ],
-      ),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
+      decoration: BoxDecoration(color: _color.withOpacity(0.12),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+          border: Border.all(color: _color.withOpacity(0.3))),
+      child: Text(status.label, style: AppTypography.labelSmall.copyWith(color: _color)),
     );
   }
 }
 
 class _Row extends StatelessWidget {
-  final String label;
-  final String value;
-  final bool isTotal;
-
-  const _Row({
-    required this.label,
-    required this.value,
-    this.isTotal = false,
-  });
+  final String label; final String value; final bool bold;
+  const _Row(this.label, this.value, {this.bold = false});
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-      children: [
-        Text(label,
-            style: isTotal
-                ? AppTypography.headingSmall
-                : AppTypography.bodyMedium),
-        Text(value,
-            style: isTotal
-                ? AppTypography.priceMedium
-                : AppTypography.bodyMedium),
-      ],
+    final s = bold ? AppTypography.headingSmall : AppTypography.bodyMedium;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+        Text(label, style: s),
+        Text(value, style: s.copyWith(color: bold ? AppColors.primary : null)),
+      ]),
     );
   }
 }
 
-class _InfoTile extends StatelessWidget {
-  final IconData icon;
-  final String label;
-  final String value;
-
-  const _InfoTile({
-    required this.icon,
-    required this.label,
-    required this.value,
-  });
+class _TimelineItem extends StatelessWidget {
+  final OrderTimelineEvent event; final bool isLast;
+  const _TimelineItem({required this.event, required this.isLast});
 
   @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
-      child: GlassCard(
-        padding: const EdgeInsets.all(AppSpacing.md),
-        borderRadius: AppSpacing.radiusLg,
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Icon(icon, size: 18, color: AppColors.textSecondary),
-            const SizedBox(width: AppSpacing.sm),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(label,
-                      style: AppTypography.bodySmall
-                          .copyWith(color: AppColors.textSecondary)),
-                  const SizedBox(height: 2),
-                  Text(value, style: AppTypography.bodyMedium),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
+    return IntrinsicHeight(child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      SizedBox(width: 24, child: Column(children: [
+        Container(width: 12, height: 12,
+            decoration: const BoxDecoration(color: AppColors.primary, shape: BoxShape.circle)),
+        if (!isLast) Expanded(child: Container(width: 2, color: AppColors.border)),
+      ])),
+      const SizedBox(width: AppSpacing.sm),
+      Expanded(child: Padding(
+        padding: EdgeInsets.only(bottom: isLast ? 0 : AppSpacing.md),
+        child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(event.statusLabel, style: AppTypography.bodyMedium),
+          Text('${event.createdAt.hour}:${event.createdAt.minute.toString().padLeft(2, '0')}',
+              style: AppTypography.bodySmall),
+        ]),
+      )),
+    ]));
   }
 }

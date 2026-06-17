@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import '../../../core/constants/dummy_data.dart';
 import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -109,7 +108,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     const SizedBox(height: AppSpacing.sm),
                     HomeSearchBar(onTap: () => context.go(RouteNames.search)),
                     const SizedBox(height: AppSpacing.md),
-                    PromoBannerSlider(banners: DummyData.promoBanners),
+                    ref.watch(bannersProvider).when(
+                      loading: () => const SizedBox(height: 160),
+                      error: (_, __) => const SizedBox.shrink(),
+                      data: (banners) => banners.isEmpty
+                          ? const SizedBox.shrink()
+                          : PromoBannerSlider(banners: banners),
+                    ),
                     const SizedBox(height: AppSpacing.lg),
                     CategorySection(onCategorySelected: (_) {}),
                     const SizedBox(height: AppSpacing.lg),

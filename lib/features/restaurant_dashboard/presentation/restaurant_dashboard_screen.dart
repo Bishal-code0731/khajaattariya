@@ -6,6 +6,7 @@ import '../../../core/theme/app_typography.dart';
 import '../../../features/auth/application/auth_provider.dart';
 import '../../../features/orders/application/order_provider.dart';
 import '../../../features/orders/domain/models/order_model.dart';
+import '../../../features/restaurant_dashboard/presentation/menu_management_screen.dart'; // Added for Manage Menu
 import '../../../shared/widgets/glass_card.dart';
 import '../../../main.dart';
 
@@ -166,6 +167,21 @@ class _OrdersView extends ConsumerWidget {
                   children: [
                     Text(restaurantName,
                         style: AppTypography.headingLarge),
+                    TextButton.icon(
+                      onPressed: () => Navigator.of(context).push(
+                        MaterialPageRoute(
+                          builder: (_) => MenuManagementScreen(
+                            restaurantId: restaurantId,
+                            restaurantName: restaurantName,
+                          ),
+                        ),
+                      ),
+                      icon: const Icon(Icons.restaurant_menu_rounded,
+                          size: 16, color: AppColors.primary),
+                      label: Text('Manage Menu',
+                          style: AppTypography.labelSmall
+                              .copyWith(color: AppColors.primary)),
+                    ),
                     const SizedBox(height: AppSpacing.md),
                     Row(
                       children: [

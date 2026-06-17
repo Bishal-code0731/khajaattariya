@@ -42,3 +42,12 @@ FutureProvider.family<RestaurantModel?, String>((ref, id) async {
   if (data == null) return null;
   return RestaurantModel.fromMap(data);
 });
+
+final bannersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
+  final data = await supabase
+      .from('banners')
+      .select()
+      .eq('is_active', true)
+      .order('sort_order');
+  return List<Map<String, dynamic>>.from(data as List);
+});

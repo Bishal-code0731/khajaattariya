@@ -1,28 +1,73 @@
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_dotenv/flutter_dotenv.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'core/router/app_router.dart';
 import 'core/theme/app_theme.dart';
+import 'firebase_options.dart';
 import 'shared/providers/theme_provider.dart';
 
-void main() async {
+final supabase = Supabase.instance.client;
+
+@pragma('vm:entry-point')
+Future<void> firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+}
+
+Future<void> initFcm() async {
+  FirebaseMessaging messaging = FirebaseMessaging.instance;
+
+  // Permission (iOS + Android 13+)
+  await messaging.requestPermission(
+    alert: true,
+    badge: true,
+    sound: true,
+  );
+
+  // Get initial token
+  final token = await messaging.getToken();
+  final userId = supabase.auth.currentUser?.id;
+
+  if (token != null && userId != null) {
+    await supabase.from('profiles').update({
+      'fcm_token': token,
+    }).eq('id', userId);
+  }
+
+  // Handle token refresh
+  messaging.onTokenRefresh.listen((newToken) async {
+    final userId = supabase.auth.currentUser?.id;
+
+    if (userId != null) {
+      await supabase.from('profiles').update({
+        'fcm_token': newToken,
+      }).eq('id', userId);
+    }
+  });
+}
+
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Load .env file first
   await dotenv.load(fileName: '.env');
 
-  // Initialize Supabase with keys from .env
+  await Firebase.initializeApp(
+    options: DefaultFirebaseOptions.currentPlatform,
+  );
+
   await Supabase.initialize(
     url: dotenv.env['SUPABASE_URL']!,
     anonKey: dotenv.env['SUPABASE_ANON_KEY']!,
   );
 
+  FirebaseMessaging.onBackgroundMessage(firebaseMessagingBackgroundHandler);
   runApp(const ProviderScope(child: KhajaAttariyaApp()));
+  initFcm(); // no await — runs in background after app starts
 }
-
-// Global Supabase client — used anywhere in the app
-final supabase = Supabase.instance.client;
 
 class KhajaAttariyaApp extends ConsumerWidget {
   const KhajaAttariyaApp({super.key});

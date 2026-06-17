@@ -24,7 +24,7 @@ class OrdersScreen extends ConsumerWidget {
       );
     }
 
-    final ordersAsync = ref.watch(customerOrdersProvider(user.id));
+    final ordersAsync = ref.watch(customerOrdersStreamProvider(user.id));
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -54,7 +54,7 @@ class OrdersScreen extends ConsumerWidget {
               const SizedBox(height: AppSpacing.md),
               TextButton(
                 onPressed: () =>
-                    ref.invalidate(customerOrdersProvider(user.id)),
+                    ref.invalidate(customerOrdersStreamProvider(user.id)),
                 child: const Text('Retry'),
               ),
             ],
