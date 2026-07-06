@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../main.dart';
 import '../domain/models/notification_model.dart';
@@ -8,11 +9,17 @@ Future<void> saveFcmToken(String userId, String token) async {
     await supabase
         .from('profiles')
         .update({'fcm_token': token}).eq('id', userId);
-  } catch (_) {}
+  } catch (e) {
+    // Non-fatal: push notifications just won't reach this device.
+    debugPrint('saveFcmToken failed for user $userId: $e');
+  }
 }
 
+// autoDispose: this realtime subscription otherwise stayed open for the
+// whole app session after the first watch, even once the user left the
+// Notifications screen.
 final notificationsProvider =
-StreamProvider.family<List<NotificationModel>, String>(
+StreamProvider.autoDispose.family<List<NotificationModel>, String>(
         (ref, userId) {
       return supabase
           .from('notifications')
@@ -24,7 +31,7 @@ StreamProvider.family<List<NotificationModel>, String>(
     });
 
 final unreadCountProvider =
-Provider.family<AsyncValue<int>, String>((ref, userId) {
+Provider.autoDispose.family<AsyncValue<int>, String>((ref, userId) {
   return ref.watch(notificationsProvider(userId)).whenData(
         (list) => list.where((n) => !n.isRead).length,
   );

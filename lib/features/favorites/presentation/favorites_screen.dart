@@ -1,12 +1,18 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../features/auth/application/auth_provider.dart';
+import '../../../shared/widgets/empty_state_view.dart';
+import '../../../shared/widgets/error_state_view.dart';
 import '../../../shared/widgets/glass_card.dart';
+import '../../../shared/widgets/offline_banner.dart';
+import '../../../shared/widgets/shimmer_loader.dart';
 import '../application/favorites_provider.dart';
 import '../domain/models/favorite_model.dart';
 
@@ -16,7 +22,27 @@ class FavoritesScreen extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final user = ref.watch(authStateProvider).valueOrNull;
-    if (user == null) return const Scaffold();
+    if (user == null) {
+      // Was `return const Scaffold();` — a genuinely blank screen with no
+      // app bar, message, or way back. Now shows a proper empty state.
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Favorites'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.safeBack(),
+          ),
+        ),
+        body: AppEmptyState(
+          icon: Icons.lock_outline_rounded,
+          title: 'Please login to view favorites',
+          action: TextButton(
+            onPressed: () => context.push(RouteNames.login),
+            child: const Text('Login'),
+          ),
+        ),
+      );
+    }
 
     final favoritesAsync = ref.watch(favoritesProvider(user.id));
 
@@ -26,51 +52,46 @@ class FavoritesScreen extends ConsumerWidget {
         title: const Text('Favorites'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go(RouteNames.home),
+          onPressed: () => context.safeBack(),
         ),
       ),
-      body: favoritesAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-        error: (_, __) =>
-        const Center(child: Text('Could not load favorites')),
-        data: (favorites) {
-          if (favorites.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.favorite_border_rounded,
-                      size: 64, color: AppColors.textHint),
-                  const SizedBox(height: AppSpacing.md),
-                  Text('No favorites yet',
-                      style: AppTypography.headingSmall
-                          .copyWith(color: AppColors.textSecondary)),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text('Heart a restaurant to save it here',
-                      style: AppTypography.bodyMedium),
-                ],
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(
+            child: favoritesAsync.when(
+              loading: () => const AppShimmerCardList(count: 4, itemHeight: 72),
+              error: (_, __) => AppErrorState(
+                message: 'Could not load favorites',
+                onRetry: () => ref.invalidate(favoritesProvider(user.id)),
               ),
-            );
-          }
+              data: (favorites) {
+                if (favorites.isEmpty) {
+                  return const AppEmptyState(
+                    icon: Icons.favorite_border_rounded,
+                    title: 'No favorites yet',
+                    subtitle: 'Heart a restaurant to save it here',
+                  );
+                }
 
-          return ListView.separated(
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.screenHorizontal,
-              vertical: AppSpacing.md,
+                return ListView.separated(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.screenHorizontal,
+                    vertical: AppSpacing.md,
+                  ),
+                  itemCount: favorites.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+                  itemBuilder: (context, index) {
+                    return _FavoriteTile(
+                      favorite: favorites[index],
+                      userId: user.id,
+                    );
+                  },
+                );
+              },
             ),
-            itemCount: favorites.length,
-            separatorBuilder: (_, __) =>
-            const SizedBox(height: AppSpacing.sm),
-            itemBuilder: (context, index) {
-              return _FavoriteTile(
-                favorite: favorites[index],
-                userId: user.id,
-              );
-            },
-          );
-        },
+          ),
+        ],
       ),
     );
   }
@@ -87,9 +108,10 @@ class _FavoriteTile extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final isBusy = ref.watch(favoriteToggleProvider(favorite.restaurantId)).isLoading;
     return GlassCard(
       onTap: () => context
-          .push('${RouteNames.restaurant}/${favorite.restaurantId}'),
+          .pushOnce('${RouteNames.restaurant}/${favorite.restaurantId}'),
       padding: const EdgeInsets.all(AppSpacing.sm),
       borderRadius: AppSpacing.radiusLg,
       child: Row(
@@ -98,12 +120,14 @@ class _FavoriteTile extends ConsumerWidget {
             borderRadius:
             BorderRadius.circular(AppSpacing.radiusMd),
             child: favorite.restaurantImageUrl.isNotEmpty
-                ? Image.network(
-              favorite.restaurantImageUrl,
+                ? CachedNetworkImage(
+              imageUrl: favorite.restaurantImageUrl,
               width: 72,
               height: 72,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) =>
+              memCacheWidth: 144,
+              placeholder: (_, __) => _PlaceholderImage(),
+              errorWidget: (_, __, ___) =>
                   _PlaceholderImage(),
             )
                 : _PlaceholderImage(),
@@ -133,10 +157,15 @@ class _FavoriteTile extends ConsumerWidget {
             ),
           ),
           IconButton(
-            icon: const Icon(Icons.favorite_rounded,
-                color: AppColors.error),
-            onPressed: () => ref
-                .read(favoriteToggleProvider.notifier)
+            icon: isBusy
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2, color: AppColors.error),
+                  )
+                : const Icon(Icons.favorite_rounded, color: AppColors.error),
+            onPressed: isBusy ? null : () => ref
+                .read(favoriteToggleProvider(favorite.restaurantId).notifier)
                 .toggle(
               userId: userId,
               restaurantId: favorite.restaurantId,

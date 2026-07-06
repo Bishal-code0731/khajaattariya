@@ -40,13 +40,33 @@ class OrderTimelineEvent {
 }
 
 final orderTimelineProvider =
-StreamProvider.family<List<OrderTimelineEvent>, String>((ref, orderId) {
+StreamProvider.autoDispose.family<List<OrderTimelineEvent>, String>((ref, orderId) {
   return supabase
       .from('order_timeline')
       .stream(primaryKey: ['id'])
       .eq('order_id', orderId)
       .order('created_at', ascending: true)
       .map((data) => data
-      .map((m) => OrderTimelineEvent.fromMap(m as Map<String, dynamic>))
+      .map((m) => OrderTimelineEvent.fromMap(m))
       .toList());
+});
+
+/// One batched query for many orders' timelines at once (for Gantt-style
+/// views showing several orders together), instead of N separate
+/// per-order queries.
+final orderTimelinesBatchProvider =
+FutureProvider.autoDispose.family<Map<String, List<OrderTimelineEvent>>, List<String>>(
+    (ref, orderIds) async {
+  if (orderIds.isEmpty) return {};
+  final data = await supabase
+      .from('order_timeline')
+      .select()
+      .inFilter('order_id', orderIds)
+      .order('created_at', ascending: true);
+  final byOrder = <String, List<OrderTimelineEvent>>{};
+  for (final row in (data as List)) {
+    final event = OrderTimelineEvent.fromMap(row as Map<String, dynamic>);
+    (byOrder[event.orderId] ??= []).add(event);
+  }
+  return byOrder;
 });

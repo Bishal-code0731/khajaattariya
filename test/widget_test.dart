@@ -3,15 +3,16 @@
 // For now we just make sure the app starts without crashing.
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:khajaattariya/main.dart';
+import 'package:khaja_attariya/main.dart';
 
 void main() {
   testWidgets('App starts successfully', (WidgetTester tester) async {
     // Build the app
-    await tester.pumpWidget(const KhajaAttariyaApp());
+    await tester.pumpWidget(const ProviderScope(child: KhajaAttariyaApp()));
 
-    // Verify our starting text is on screen
-    expect(find.text('Khaja Attariya is starting...'), findsOneWidget);
+    // Verify the app renders without crashing
+    expect(find.byType(MaterialApp), findsOneWidget);
   });
 }

@@ -1,3 +1,4 @@
+import 'package:riverpod/riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../data/auth_repository_impl.dart';
 import '../domain/models/user_model.dart';
@@ -6,12 +7,12 @@ import '../domain/repositories/auth_repository.dart';
 part 'auth_provider.g.dart';
 
 @riverpod
-AuthRepository authRepository(AuthRepositoryRef ref) {
+AuthRepository authRepository(Ref ref) {
   return AuthRepositoryImpl();
 }
 
 @riverpod
-Stream<UserModel?> authState(AuthStateRef ref) {
+Stream<UserModel?> authState(Ref ref) {
   return ref.watch(authRepositoryProvider).authStateChanges;
 }
 
@@ -56,8 +57,15 @@ class AuthNotifier extends _$AuthNotifier {
 
   Future<void> signOut() async {
     state = const AsyncValue.loading();
-    await ref.read(authRepositoryProvider).signOut();
-    state = const AsyncValue.data(null);
+    try {
+      await ref.read(authRepositoryProvider).signOut();
+      state = const AsyncValue.data(null);
+    } catch (e, st) {
+      // Without this, a transient failure here (e.g. network drop while
+      // revoking the session) leaves every screen watching this state
+      // stuck showing a loading spinner forever.
+      state = AsyncValue.error(e, st);
+    }
   }
 
   Future<void> sendPasswordReset(String email) async {

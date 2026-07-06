@@ -1,9 +1,13 @@
-import 'package:supabase_flutter/supabase_flutter.dart';
+import '../../../core/cache/local_store.dart';
+import '../../../core/network/connectivity_provider.dart';
+import '../../../core/network/retry_queue.dart';
+import '../../../core/utils/app_logger.dart';
 import '../../../main.dart';
 import '../domain/models/user_model.dart';
 import '../domain/repositories/auth_repository.dart';
 
 class AuthRepositoryImpl implements AuthRepository {
+  static String _profileDiskKey(String userId) => 'profile:$userId';
   @override
   Future<UserModel> signUp({
     required String email,
@@ -30,10 +34,11 @@ class AuthRepositoryImpl implements AuthRepository {
       throw Exception('Please confirm your email then log in.');
     }
 
-    // Wait a moment for the trigger to create the profile
-    await Future.delayed(const Duration(milliseconds: 500));
-
-    return _fetchProfile(response.user!.id, email);
+    // The `handle_new_user` DB trigger creates the profiles row
+    // asynchronously right after auth.users gets the new user, so a
+    // fixed delay here would either be too short under load or waste
+    // time when the trigger is instant. Poll briefly instead.
+    return _fetchProfileWithRetry(response.user!.id, email);
   }
 
   @override
@@ -56,6 +61,10 @@ class AuthRepositoryImpl implements AuthRepository {
   @override
   Future<void> signOut() async {
     await supabase.auth.signOut();
+    // A queued offline write belongs to this account — replaying it
+    // after a different user logs in on the same device would apply
+    // it under the wrong session.
+    await RetryQueue.instance.clear();
   }
 
   @override
@@ -80,12 +89,56 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   Future<UserModel> _fetchProfile(String userId, String email) async {
-    final data = await supabase
-        .from('profiles')
-        .select()
-        .eq('id', userId)
-        .single();
+    // Skip the network round trip (and its timeout) entirely when we
+    // already know we're offline and have something cached to show.
+    if (!await checkIsOnline()) {
+      final cached = await LocalStore.instance.loadMap(_profileDiskKey(userId));
+      if (cached != null) {
+        AppLogger.info('auth', 'offline — serving cached profile for $userId');
+        return UserModel.fromMap(cached, cached['email'] as String? ?? email);
+      }
+    }
 
-    return UserModel.fromMap(data, email);
+    try {
+      final data = await supabase
+          .from('profiles')
+          .select()
+          .eq('id', userId)
+          .single();
+
+      final user = UserModel.fromMap(data, email);
+      // Write-through: the profile is small and rarely changes, so
+      // caching it makes "offline profile" work with no extra plumbing —
+      // just persist on every successful read.
+      await LocalStore.instance.saveMap(_profileDiskKey(userId), {
+        ...data,
+        'email': email,
+      });
+      return user;
+    } catch (e) {
+      final cached = await LocalStore.instance.loadMap(_profileDiskKey(userId));
+      if (cached != null) {
+        AppLogger.warning('auth', 'profile fetch failed, serving cached profile: $e');
+        return UserModel.fromMap(cached, cached['email'] as String? ?? email);
+      }
+      rethrow;
+    }
+  }
+
+  /// Retries fetching the just-created profile a few times with
+  /// backoff to tolerate normal replication lag on the `handle_new_user`
+  /// trigger, instead of assuming a fixed delay is always enough.
+  Future<UserModel> _fetchProfileWithRetry(String userId, String email) async {
+    const attempts = 5;
+    for (var i = 0; i < attempts; i++) {
+      try {
+        return await _fetchProfile(userId, email);
+      } catch (_) {
+        if (i == attempts - 1) rethrow;
+        await Future.delayed(Duration(milliseconds: 300 * (i + 1)));
+      }
+    }
+    // Unreachable: the loop above always returns or rethrows.
+    throw Exception('Could not load your profile. Please try logging in.');
   }
 }

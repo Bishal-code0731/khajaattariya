@@ -1,74 +1,92 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../core/theme/app_colors.dart';
-import '../../core/theme/app_spacing.dart';
+import '../../core/theme/app_typography.dart';
 
-class GlassBottomNav extends StatelessWidget {
+class GlassBottomNav extends ConsumerWidget {
   final int currentIndex;
-  final Function(int) onTap;
+  final ValueChanged<int> onTap;
+  final List<GlassNavItem> items;
 
   const GlassBottomNav({
     super.key,
     required this.currentIndex,
     required this.onTap,
+    this.items = _defaultItems,
   });
 
-  static const List<_NavItem> _items = [
-    _NavItem(
-      icon: Icons.home_outlined,
-      activeIcon: Icons.home_rounded,
-      label: 'Home',
-    ),
-    _NavItem(
-      icon: Icons.receipt_long_outlined,
-      activeIcon: Icons.receipt_long_rounded,
-      label: 'Orders',
-    ),
-    _NavItem(
-      icon: Icons.chat_bubble_outline_rounded,
-      activeIcon: Icons.chat_bubble_rounded,
-      label: 'Messages',
-    ),
-    _NavItem(
-      icon: Icons.menu_rounded,
-      activeIcon: Icons.menu_rounded,
-      label: 'Menu',
-    ),
+  static const _defaultItems = [
+    GlassNavItem(icon: Icons.home_rounded, label: 'Home'),
+    GlassNavItem(icon: Icons.search_rounded, label: 'Search'),
+    GlassNavItem(icon: Icons.shopping_cart_outlined, label: 'Cart'),
+    GlassNavItem(icon: Icons.menu_rounded, label: 'Menu'),
   ];
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
-      child: ClipRRect(
-        borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-        child: BackdropFilter(
-          filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
-          child: Container(
-            height: AppSpacing.bottomNavHeight,
-            decoration: BoxDecoration(
-              color: isDark
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.white.withOpacity(0.75),
-              borderRadius: BorderRadius.circular(AppSpacing.radiusXl),
-              border: Border.all(
+    return ClipRRect(
+      child: BackdropFilter(
+        filter: ImageFilter.blur(sigmaX: 24, sigmaY: 24),
+        child: Container(
+          decoration: BoxDecoration(
+            color: isDark
+                ? Colors.black.withValues(alpha: 0.6)
+                : Colors.white.withValues(alpha: 0.85),
+            border: Border(
+              top: BorderSide(
                 color: isDark
-                    ? Colors.white.withOpacity(0.15)
-                    : Colors.white.withOpacity(0.8),
+                    ? Colors.white.withValues(alpha: 0.1)
+                    : Colors.white.withValues(alpha: 0.6),
                 width: 1,
               ),
             ),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceAround,
-              children: List.generate(
-                _items.length,
-                    (index) => _NavTile(
-                  item: _items[index],
-                  isActive: currentIndex == index,
-                  onTap: () => onTap(index),
-                ),
+          ),
+          child: SafeArea(
+            top: false,
+            child: SizedBox(
+              height: 64,
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceAround,
+                children: items.asMap().entries.map((e) {
+                  final index = e.key;
+                  final item = e.value;
+                  final isSelected = currentIndex == index;
+
+                  return GestureDetector(
+                    onTap: () => onTap(index),
+                    behavior: HitTestBehavior.opaque,
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 200),
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 8),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            item.icon,
+                            color: isSelected
+                                ? AppColors.primary
+                                : AppColors.textHint,
+                            size: 24,
+                          ),
+                          const SizedBox(height: 3),
+                          Text(
+                            item.label,
+                            style: AppTypography.labelSmall.copyWith(
+                              color: isSelected
+                                  ? AppColors.primary
+                                  : AppColors.textHint,
+                              fontSize: 10,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                }).toList(),
               ),
             ),
           ),
@@ -78,70 +96,9 @@ class GlassBottomNav extends StatelessWidget {
   }
 }
 
-class _NavTile extends StatelessWidget {
-  final _NavItem item;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _NavTile({
-    required this.item,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
-      child: SizedBox(
-        width: 72,
-        child: Column(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            AnimatedContainer(
-              duration: const Duration(milliseconds: 200),
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 6,
-              ),
-              decoration: BoxDecoration(
-                color: isActive
-                    ? AppColors.primary.withOpacity(0.15)
-                    : Colors.transparent,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-              ),
-              child: Icon(
-                isActive ? item.activeIcon : item.icon,
-                color: isActive ? AppColors.primary : AppColors.textHint,
-                size: 24,
-              ),
-            ),
-            const SizedBox(height: 2),
-            Text(
-              item.label,
-              style: TextStyle(
-                fontSize: 10,
-                fontWeight:
-                isActive ? FontWeight.w600 : FontWeight.w400,
-                color: isActive ? AppColors.primary : AppColors.textHint,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NavItem {
+class GlassNavItem {
   final IconData icon;
-  final IconData activeIcon;
   final String label;
 
-  const _NavItem({
-    required this.icon,
-    required this.activeIcon,
-    required this.label,
-  });
+  const GlassNavItem({required this.icon, required this.label});
 }

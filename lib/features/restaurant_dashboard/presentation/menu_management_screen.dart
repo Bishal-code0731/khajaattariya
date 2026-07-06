@@ -7,7 +7,12 @@ import '../../../core/theme/app_typography.dart';
 import '../../../main.dart';
 import '../../../shared/widgets/app_button.dart';
 import '../../../shared/widgets/app_text_field.dart';
+import '../../../shared/widgets/async_value_view.dart';
+import '../../../core/utils/image_upload.dart';
+import '../../../core/utils/validators.dart';
 import '../../../shared/widgets/glass_card.dart';
+import '../../../shared/widgets/loading_indicator.dart';
+import '../../../shared/widgets/shimmer_loader.dart';
 
 // Fetch menu items for a restaurant (admin/owner view — includes unavailable)
 final ownerMenuItemsProvider =
@@ -37,6 +42,11 @@ class MenuManagementScreen extends ConsumerStatefulWidget {
 }
 
 class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
+  // Tracks which item rows have an update/delete in flight so taps on
+  // that specific row are ignored until it resolves — other rows stay
+  // fully interactive.
+  final _busyItemIds = <String>{};
+
   @override
   Widget build(BuildContext context) {
     final itemsAsync =
@@ -58,24 +68,11 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
         label: const Text('Add Item',
             style: TextStyle(color: Colors.white)),
       ),
-      body: itemsAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-        error: (_, __) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Text('Could not load menu',
-                  style: AppTypography.bodyMedium),
-              TextButton(
-                onPressed: () => ref
-                    .invalidate(ownerMenuItemsProvider(widget.restaurantId)),
-                child: const Text('Retry'),
-              ),
-            ],
-          ),
-        ),
+      body: AsyncValueView(
+        value: itemsAsync,
+        loading: () => const AppShimmerCardList(count: 5, itemHeight: 64),
+        errorMessage: 'Could not load menu',
+        onRetry: () => ref.invalidate(ownerMenuItemsProvider(widget.restaurantId)),
         data: (items) => items.isEmpty
             ? Center(
           child: Column(
@@ -98,16 +95,19 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
             bottom: 100, // space for FAB
           ),
           itemCount: items.length,
-          itemBuilder: (context, index) =>
-              _MenuItemCard(
-                item: items[index],
-                onEdit: () => _showItemSheet(context, items[index]),
-                onDelete: () => _deleteItem(items[index]['id'] as String),
-                onToggleAvailable: () => _toggleAvailable(
-                  items[index]['id'] as String,
-                  items[index]['is_available'] as bool,
-                ),
+          itemBuilder: (context, index) {
+            final id = items[index]['id'] as String;
+            return _MenuItemCard(
+              item: items[index],
+              isBusy: _busyItemIds.contains(id),
+              onEdit: () => _showItemSheet(context, items[index]),
+              onDelete: () => _deleteItem(id),
+              onToggleAvailable: () => _toggleAvailable(
+                id,
+                items[index]['is_available'] as bool,
               ),
+            );
+          },
         ),
       ),
     );
@@ -149,28 +149,62 @@ class _MenuManagementScreenState extends ConsumerState<MenuManagementScreen> {
       ),
     );
 
-    if (confirmed == true) {
-      await supabase.from('menu_items').delete().eq('id', itemId);
+    if (confirmed != true || _busyItemIds.contains(itemId)) return;
+    setState(() => _busyItemIds.add(itemId));
+    try {
+      final deleted = await supabase.from('menu_items').delete().eq('id', itemId).select('id');
+      if (deleted.isEmpty) {
+        throw Exception('Could not delete item — it may already be removed.');
+      }
       ref.invalidate(ownerMenuItemsProvider(widget.restaurantId));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to delete: $e'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _busyItemIds.remove(itemId));
     }
   }
 
   Future<void> _toggleAvailable(String itemId, bool current) async {
-    await supabase
-        .from('menu_items')
-        .update({'is_available': !current}).eq('id', itemId);
-    ref.invalidate(ownerMenuItemsProvider(widget.restaurantId));
+    if (_busyItemIds.contains(itemId)) return;
+    setState(() => _busyItemIds.add(itemId));
+    try {
+      final updated = await supabase
+          .from('menu_items')
+          .update({'is_available': !current}).eq('id', itemId).select('id');
+      if (updated.isEmpty) {
+        throw Exception('Could not update item. Please try again.');
+      }
+      ref.invalidate(ownerMenuItemsProvider(widget.restaurantId));
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Failed to update: $e'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _busyItemIds.remove(itemId));
+    }
   }
 }
 
 class _MenuItemCard extends StatelessWidget {
   final Map<String, dynamic> item;
+  final bool isBusy;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onToggleAvailable;
 
   const _MenuItemCard({
     required this.item,
+    required this.isBusy,
     required this.onEdit,
     required this.onDelete,
     required this.onToggleAvailable,
@@ -238,30 +272,33 @@ class _MenuItemCard extends StatelessWidget {
             ),
           ),
           // Available toggle
-          GestureDetector(
-            onTap: onToggleAvailable,
-            child: Container(
-              padding: const EdgeInsets.symmetric(
-                  horizontal: AppSpacing.sm, vertical: 3),
-              decoration: BoxDecoration(
-                color: isAvailable
-                    ? AppColors.success.withOpacity(0.1)
-                    : AppColors.error.withOpacity(0.1),
-                borderRadius:
-                BorderRadius.circular(AppSpacing.radiusSm),
-              ),
-              child: Text(
-                isAvailable ? 'Available' : 'Hidden',
-                style: AppTypography.labelSmall.copyWith(
-                  color:
-                  isAvailable ? AppColors.success : AppColors.error,
+          if (isBusy)
+            const SizedBox(width: 16, height: 16, child: AppLoader(size: 16))
+          else
+            GestureDetector(
+              onTap: onToggleAvailable,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: AppSpacing.sm, vertical: 3),
+                decoration: BoxDecoration(
+                  color: isAvailable
+                      ? AppColors.success.withValues(alpha: 0.1)
+                      : AppColors.error.withValues(alpha: 0.1),
+                  borderRadius:
+                  BorderRadius.circular(AppSpacing.radiusSm),
+                ),
+                child: Text(
+                  isAvailable ? 'Available' : 'Hidden',
+                  style: AppTypography.labelSmall.copyWith(
+                    color:
+                    isAvailable ? AppColors.success : AppColors.error,
+                  ),
                 ),
               ),
             ),
-          ),
           const SizedBox(width: AppSpacing.sm),
           IconButton(
-            onPressed: onEdit,
+            onPressed: isBusy ? null : onEdit,
             icon: const Icon(Icons.edit_outlined,
                 size: 18, color: AppColors.textSecondary),
             padding: EdgeInsets.zero,
@@ -269,7 +306,7 @@ class _MenuItemCard extends StatelessWidget {
           ),
           const SizedBox(width: AppSpacing.sm),
           IconButton(
-            onPressed: onDelete,
+            onPressed: isBusy ? null : onDelete,
             icon: const Icon(Icons.delete_outline,
                 size: 18, color: AppColors.error),
             padding: EdgeInsets.zero,
@@ -304,8 +341,15 @@ class _MenuItemFormState extends ConsumerState<_MenuItemForm> {
   late TextEditingController _offerController;
   bool _isVeg = false;
   bool _isLoading = false;
+  bool _isUploadingImage = false;
 
   bool get _isEditing => widget.existingItem != null;
+
+  static String _formatPrice(double price) {
+    return price == price.truncateToDouble()
+        ? price.toInt().toString()
+        : price.toStringAsFixed(2);
+  }
 
   @override
   void initState() {
@@ -315,7 +359,9 @@ class _MenuItemFormState extends ConsumerState<_MenuItemForm> {
         TextEditingController(text: item?['name'] as String? ?? '');
     _priceController = TextEditingController(
         text: item != null
-            ? (item['price'] as num).toInt().toString()
+            // Preserve decimals (e.g. 149.50) — .toInt() used to silently
+            // truncate the paisa on every edit of an existing item.
+            ? _formatPrice((item['price'] as num).toDouble())
             : '');
     _imageController =
         TextEditingController(text: item?['image_url'] as String? ?? '');
@@ -349,16 +395,18 @@ class _MenuItemFormState extends ConsumerState<_MenuItemForm> {
             ? null
             : _offerController.text.trim(),
         'is_veg': _isVeg,
-        'is_available': true,
       };
 
       if (_isEditing) {
+        // Don't force is_available back to true — an owner who hid this
+        // item shouldn't have it silently re-listed just from tweaking
+        // the name/price/image.
         await supabase
             .from('menu_items')
             .update(data)
             .eq('id', widget.existingItem!['id'] as String);
       } else {
-        await supabase.from('menu_items').insert(data);
+        await supabase.from('menu_items').insert({...data, 'is_available': true});
       }
 
       if (mounted) {
@@ -377,6 +425,31 @@ class _MenuItemFormState extends ConsumerState<_MenuItemForm> {
       }
     } finally {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _pickAndUploadImage() async {
+    if (_isUploadingImage) return;
+    setState(() => _isUploadingImage = true);
+    try {
+      final path = 'menu-items/${widget.restaurantId}/${DateTime.now().microsecondsSinceEpoch}.jpg';
+      final url = await ImageUpload.pickCompressAndUpload(
+        supabase: supabase,
+        bucket: 'restaurant-media',
+        path: path,
+        maxDimension: 800,
+      );
+      if (url != null) _imageController.text = url;
+    } catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+          content: Text('Could not upload photo: $e'),
+          backgroundColor: AppColors.error,
+          behavior: SnackBarBehavior.floating,
+        ));
+      }
+    } finally {
+      if (mounted) setState(() => _isUploadingImage = false);
     }
   }
 
@@ -423,8 +496,7 @@ class _MenuItemFormState extends ConsumerState<_MenuItemForm> {
                   hint: 'e.g. Steam Momo',
                   controller: _nameController,
                   prefixIcon: Icons.fastfood_outlined,
-                  validator: (v) =>
-                  v == null || v.isEmpty ? 'Name is required' : null,
+                  validator: (v) => Validators.name(v, field: 'Item name'),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppTextField(
@@ -433,18 +505,22 @@ class _MenuItemFormState extends ConsumerState<_MenuItemForm> {
                   controller: _priceController,
                   keyboardType: TextInputType.number,
                   prefixIcon: Icons.payments_outlined,
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Price is required';
-                    if (double.tryParse(v) == null) return 'Enter valid price';
-                    return null;
-                  },
+                  validator: Validators.price,
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppTextField(
                   label: 'Image URL (optional)',
-                  hint: 'https://...',
+                  hint: 'https://... or upload a photo below',
                   controller: _imageController,
                   prefixIcon: Icons.image_outlined,
+                ),
+                const SizedBox(height: AppSpacing.sm),
+                OutlinedButton.icon(
+                  onPressed: _isUploadingImage ? null : _pickAndUploadImage,
+                  icon: _isUploadingImage
+                      ? const AppLoader.button(color: AppColors.primary)
+                      : const Icon(Icons.upload_rounded, size: 18),
+                  label: Text(_isUploadingImage ? 'Uploading…' : 'Upload Photo'),
                 ),
                 const SizedBox(height: AppSpacing.md),
                 AppTextField(

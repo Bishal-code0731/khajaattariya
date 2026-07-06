@@ -1,12 +1,18 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../features/auth/application/auth_provider.dart';
+import '../../../shared/widgets/app_status_badge.dart';
+import '../../../shared/widgets/empty_state_view.dart';
+import '../../../shared/widgets/error_state_view.dart';
 import '../../../shared/widgets/glass_card.dart';
+import '../../../shared/widgets/offline_banner.dart';
+import '../../../shared/widgets/shimmer_loader.dart';
 import '../application/order_provider.dart';
 import '../domain/models/order_model.dart';
 
@@ -19,8 +25,21 @@ class OrdersScreen extends ConsumerWidget {
 
     if (user == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('My Orders')),
-        body: const Center(child: Text('Please login to view orders')),
+        appBar: AppBar(
+          title: const Text('My Orders'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.safeBack(),
+          ),
+        ),
+        body: AppEmptyState(
+          icon: Icons.lock_outline_rounded,
+          title: 'Please login to view orders',
+          action: TextButton(
+            onPressed: () => context.push(RouteNames.login),
+            child: const Text('Login'),
+          ),
+        ),
       );
     }
 
@@ -32,48 +51,36 @@ class OrdersScreen extends ConsumerWidget {
         title: const Text('My Orders'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go(RouteNames.home),
+          onPressed: () => context.safeBack(),
         ),
       ),
-      body: ordersAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(
-            color: AppColors.primary,
-            strokeWidth: 2,
-          ),
-        ),
-        error: (e, _) => Center(
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              const Icon(Icons.error_outline,
-                  size: 48, color: AppColors.textHint),
-              const SizedBox(height: AppSpacing.md),
-              Text('Could not load orders',
-                  style: AppTypography.bodyMedium),
-              const SizedBox(height: AppSpacing.md),
-              TextButton(
-                onPressed: () =>
-                    ref.invalidate(customerOrdersStreamProvider(user.id)),
-                child: const Text('Retry'),
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(
+            child: ordersAsync.when(
+              loading: () => const AppShimmerCardList(count: 4, itemHeight: 88),
+              error: (e, _) => AppErrorState(
+                message: 'Could not load orders',
+                onRetry: () => ref.invalidate(customerOrdersStreamProvider(user.id)),
               ),
-            ],
-          ),
-        ),
-        data: (orders) => orders.isEmpty
-            ? _EmptyOrders()
-            : ListView.builder(
-          padding: const EdgeInsets.symmetric(
-            vertical: AppSpacing.sm,
-          ),
-          itemCount: orders.length,
-          itemBuilder: (context, index) => _OrderCard(
-            order: orders[index],
-            onTap: () => context.go(
-              '${RouteNames.orderDetail}/${orders[index].id}',
+              data: (orders) => orders.isEmpty
+                  ? _EmptyOrders()
+                  : ListView.builder(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: AppSpacing.sm,
+                      ),
+                      itemCount: orders.length,
+                      itemBuilder: (context, index) => _OrderCard(
+                        order: orders[index],
+                        onTap: () => context.pushOnce(
+                          '${RouteNames.orderDetail}/${orders[index].id}',
+                        ),
+                      ),
+                    ),
             ),
           ),
-        ),
+        ],
       ),
     );
   }
@@ -82,26 +89,13 @@ class OrdersScreen extends ConsumerWidget {
 class _EmptyOrders extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.receipt_long_outlined,
-              size: 72, color: AppColors.textHint),
-          const SizedBox(height: AppSpacing.md),
-          const Text('No orders yet', style: AppTypography.headingSmall),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'Your order history will appear here',
-            style: AppTypography.bodyMedium,
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          TextButton(
-            onPressed: () => context.go(RouteNames.home),
-            child: const Text('Browse Restaurants'),
-          ),
-        ],
+    return AppEmptyState(
+      icon: Icons.receipt_long_outlined,
+      title: 'No orders yet',
+      subtitle: 'Your order history will appear here',
+      action: TextButton(
+        onPressed: () => context.safeBack(),
+        child: const Text('Browse Restaurants'),
       ),
     );
   }
@@ -136,7 +130,7 @@ class _OrderCard extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
-              _StatusBadge(status: order.status),
+              AppStatusBadge(status: order.status),
             ],
           ),
           const SizedBox(height: AppSpacing.xs),
@@ -178,39 +172,3 @@ class _OrderCard extends StatelessWidget {
   }
 }
 
-class _StatusBadge extends StatelessWidget {
-  final OrderStatus status;
-
-  const _StatusBadge({required this.status});
-
-  Color get _color {
-    switch (status) {
-      case OrderStatus.pending:    return AppColors.accent;
-      case OrderStatus.confirmed:  return AppColors.primary;
-      case OrderStatus.preparing:  return AppColors.primary;
-      case OrderStatus.ready:      return AppColors.success;
-      case OrderStatus.pickedUp:   return AppColors.success;
-      case OrderStatus.delivered:  return AppColors.success;
-      case OrderStatus.cancelled:  return AppColors.error;
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.sm,
-        vertical: 3,
-      ),
-      decoration: BoxDecoration(
-        color: _color.withOpacity(0.12),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-        border: Border.all(color: _color.withOpacity(0.3)),
-      ),
-      child: Text(
-        status.label,
-        style: AppTypography.labelSmall.copyWith(color: _color),
-      ),
-    );
-  }
-}

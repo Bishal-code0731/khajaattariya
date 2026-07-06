@@ -12,6 +12,8 @@ build/
 # Android
 android/local.properties
 android/key.properties
+*.jks
+*.keystore
 
 # iOS
 ios/Pods/

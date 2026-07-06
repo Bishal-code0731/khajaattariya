@@ -1,51 +1,50 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod/riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../main.dart';
 import '../domain/models/restaurant_hours_model.dart';
 
-final restaurantHoursProvider =
-FutureProvider.family<List<RestaurantHoursModel>, String>(
-        (ref, restaurantId) async {
-      final data = await supabase
-          .from('restaurant_hours')
-          .select()
-          .eq('restaurant_id', restaurantId)
-          .order('weekday');
-      return (data as List)
-          .map((m) => RestaurantHoursModel.fromMap(m))
-          .toList();
-    });
+part 'restaurant_hours_provider.g.dart';
 
-final restaurantHoursNotifierProvider = StateNotifierProvider
-    .family<RestaurantHoursNotifier, AsyncValue<void>, String>(
-        (ref, restaurantId) =>
-        RestaurantHoursNotifier(restaurantId, ref));
+@Riverpod(keepAlive: true)
+Future<List<RestaurantHoursModel>> restaurantHours(Ref ref, String restaurantId) async {
+  final data = await supabase
+      .from('restaurant_hours')
+      .select()
+      .eq('restaurant_id', restaurantId)
+      .order('weekday');
+  return (data as List)
+      .map((m) => RestaurantHoursModel.fromMap(m))
+      .toList();
+}
 
-class RestaurantHoursNotifier extends StateNotifier<AsyncValue<void>> {
-  final String restaurantId;
-  final Ref _ref;
+@Riverpod(keepAlive: true)
+class RestaurantHoursNotifier extends _$RestaurantHoursNotifier {
+  @override
+  AsyncValue<void> build(String restaurantId) => const AsyncValue.data(null);
 
-  RestaurantHoursNotifier(this.restaurantId, this._ref)
-      : super(const AsyncValue.data(null));
-
-  /// Upsert all 7 days at once
+  /// Upsert all 7 days in a single call — batching (instead of one
+  /// upsert per day in a loop) means a mid-save failure can't leave some
+  /// days updated and others not, silently reporting overall failure
+  /// while the DB is already in a mixed state.
   Future<bool> saveHours(
       List<RestaurantHoursModel> hours) async {
     state = const AsyncValue.loading();
     try {
-      for (final h in hours) {
-        await supabase.from('restaurant_hours').upsert(
-          {
-            'id': h.id.isEmpty ? null : h.id,
-            'restaurant_id': restaurantId,
-            'weekday': h.weekday,
-            'is_open': h.isOpen,
-            'open_time': h.isOpen ? h.openTime : null,
-            'close_time': h.isOpen ? h.closeTime : null,
-          },
-          onConflict: 'restaurant_id,weekday',
-        );
-      }
-      _ref.invalidate(restaurantHoursProvider(restaurantId));
+      await supabase.from('restaurant_hours').upsert(
+        [
+          for (final h in hours)
+            {
+              'id': h.id.isEmpty ? null : h.id,
+              'restaurant_id': restaurantId,
+              'weekday': h.weekday,
+              'is_open': h.isOpen,
+              'open_time': h.isOpen ? h.openTime : null,
+              'close_time': h.isOpen ? h.closeTime : null,
+            },
+        ],
+        onConflict: 'restaurant_id,weekday',
+      );
+      ref.invalidate(restaurantHoursProvider(restaurantId));
       state = const AsyncValue.data(null);
       return true;
     } catch (e) {

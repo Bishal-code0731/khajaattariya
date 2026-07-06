@@ -1,4 +1,5 @@
 import 'dart:ui';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,8 +10,9 @@ import '../../core/theme/app_typography.dart';
 import '../../features/auth/application/auth_provider.dart';
 import '../../features/auth/domain/models/user_model.dart';
 import '../providers/theme_provider.dart';
+import 'app_snackbar.dart';
 
-class AppSideMenu extends ConsumerWidget {
+class AppSideMenu extends ConsumerStatefulWidget {
   final VoidCallback onClose;
 
   const AppSideMenu({
@@ -18,24 +20,41 @@ class AppSideMenu extends ConsumerWidget {
     required this.onClose,
   });
 
+  @override
+  ConsumerState<AppSideMenu> createState() => _AppSideMenuState();
+}
+
+class _AppSideMenuState extends ConsumerState<AppSideMenu> {
+  // Guards against double navigation if a menu item is tapped more than
+  // once before the close animation + delayed push below fires.
+  bool _isNavigating = false;
+
   void _navigate(BuildContext context, String path) {
-    onClose();
+    if (_isNavigating) return;
+    _isNavigating = true;
+    widget.onClose();
     Future.delayed(
       const Duration(milliseconds: 300),
           () {
-        if (context.mounted) context.go(path);
+        _isNavigating = false;
+        if (context.mounted) context.push(path);
       },
     );
   }
 
+  void _comingSoon(BuildContext context, String feature) {
+    widget.onClose();
+    AppSnackbar.info(context, '$feature is coming soon');
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final themeMode = ref.watch(themeNotifierProvider);
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final user = ref.watch(authStateProvider).valueOrNull;
 
     return GestureDetector(
-      onTap: onClose,
+      onTap: widget.onClose,
       child: Stack(
         children: [
           BackdropFilter(
@@ -54,7 +73,10 @@ class AppSideMenu extends ConsumerWidget {
                 child: BackdropFilter(
                   filter: ImageFilter.blur(sigmaX: 20, sigmaY: 20),
                   child: Container(
-                    width: MediaQuery.of(context).size.width * 0.78,
+                    // Capped so the drawer doesn't become an absurdly
+                    // wide panel on tablets/desktop — 78% of a phone
+                    // screen reads fine, 78% of a 1400px window doesn't.
+                    width: (MediaQuery.of(context).size.width * 0.78).clamp(0.0, 360.0),
                     height: double.infinity,
                     decoration: BoxDecoration(
                       color: isDark
@@ -90,7 +112,7 @@ class AppSideMenu extends ConsumerWidget {
                                     _MenuItem(
                                       icon: Icons.home_rounded,
                                       label: 'Home',
-                                      onTap: onClose,
+                                      onTap: widget.onClose,
                                     ),
                                     if (user != null) ...[
                                       _MenuItem(
@@ -134,22 +156,22 @@ class AppSideMenu extends ConsumerWidget {
                                     _MenuItem(
                                       icon: Icons.language_rounded,
                                       label: 'Language',
-                                      onTap: () {},
+                                      onTap: () => _comingSoon(context, 'Language'),
                                     ),
                                     _MenuItem(
                                       icon: Icons.star_outline_rounded,
                                       label: 'Rate the App',
-                                      onTap: () {},
+                                      onTap: () => _comingSoon(context, 'Rate the App'),
                                     ),
                                     _MenuItem(
                                       icon: Icons.help_outline_rounded,
                                       label: 'Help & Support',
-                                      onTap: () {},
+                                      onTap: () => _navigate(context, RouteNames.support),
                                     ),
                                     _MenuItem(
                                       icon: Icons.info_outline_rounded,
                                       label: 'About',
-                                      onTap: () {},
+                                      onTap: () => _comingSoon(context, 'About'),
                                     ),
                                   ]),
                                   if (user != null) ...[
@@ -160,7 +182,7 @@ class AppSideMenu extends ConsumerWidget {
                                         label: 'Logout',
                                         color: AppColors.error,
                                         onTap: () async {
-                                          onClose();
+                                          widget.onClose();
                                           await ref
                                               .read(authNotifierProvider
                                               .notifier)
@@ -253,7 +275,7 @@ class AppSideMenu extends ConsumerWidget {
                 radius: 26,
                 backgroundColor: AppColors.primary.withValues(alpha: 0.15),
                 backgroundImage: user.avatarUrl != null
-                    ? NetworkImage(user.avatarUrl!)
+                    ? CachedNetworkImageProvider(user.avatarUrl!)
                     : null,
                 child: user.avatarUrl == null
                     ? Text(
@@ -290,14 +312,14 @@ class AppSideMenu extends ConsumerWidget {
                         vertical: 2,
                       ),
                       decoration: BoxDecoration(
-                        color: AppColors.primary.withValues(alpha: 0.1),
+                        color: user.userRole.color.withValues(alpha: 0.1),
                         borderRadius:
                         BorderRadius.circular(AppSpacing.radiusSm),
                       ),
                       child: Text(
-                        user.role.toUpperCase(),
+                        user.userRole.label.toUpperCase(),
                         style: AppTypography.labelSmall.copyWith(
-                          color: AppColors.primary,
+                          color: user.userRole.color,
                           fontWeight: FontWeight.w700,
                         ),
                       ),

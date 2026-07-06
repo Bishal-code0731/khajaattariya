@@ -15,6 +15,7 @@ class RouteNames {
   static const String addressBook    = '/address-book';
   static const String favorites      = '/favorites';
   static const String support        = '/support';       // NEW
+  static const String tracking       = '/tracking';       // NEW
   static const String restaurantDashboard = '/restaurant-dashboard';
   static const String menuManagement      = '/menu-management';
   static const String restaurantHours     = '/restaurant-hours';

@@ -1,11 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/enums/user_role.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/utils/validators.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/app_text_field.dart';
 import '../application/auth_provider.dart';
 
@@ -23,7 +27,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   final _phoneController = TextEditingController();
   final _passwordController = TextEditingController();
   final _confirmPasswordController = TextEditingController();
-  String _selectedRole = 'customer';
+  UserRole _selectedRole = UserRole.customer;
   bool _isLoading = false;
 
   @override
@@ -39,17 +43,18 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   // Returns emoji + subtitle based on selected role
   ({String emoji, String subtitle}) get _roleHeader {
     switch (_selectedRole) {
-      case 'restaurant':
+      case UserRole.restaurant:
         return (
         emoji: '🍽️',
         subtitle: 'Partner with Khaja Attariya and grow your restaurant business',
         );
-      case 'rider':
+      case UserRole.rider:
         return (
         emoji: '🛵',
         subtitle: 'Deliver food across Attariya and earn on your schedule',
         );
-      default:
+      case UserRole.customer:
+      case UserRole.admin:
         return (
         emoji: '🎉',
         subtitle: 'Join Khaja Attariya and order your favourite food',
@@ -61,37 +66,41 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
     if (!_formKey.currentState!.validate()) return;
     setState(() => _isLoading = true);
 
-    await ref.read(authNotifierProvider.notifier).signUp(
-      email: _emailController.text.trim(),
-      password: _passwordController.text,
-      fullName: _nameController.text.trim(),
-      phone: _phoneController.text.trim(),
-      role: _selectedRole,
-    );
+    try {
+      await ref.read(authNotifierProvider.notifier).signUp(
+        email: _emailController.text.trim(),
+        password: _passwordController.text,
+        fullName: _nameController.text.trim(),
+        phone: _phoneController.text.trim(),
+        role: _selectedRole.name,
+      );
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isLoading = false);
+      AppSnackbar.error(context, e);
+      return;
+    }
 
     if (!mounted) return;
     setState(() => _isLoading = false);
 
+    // Navigation on success is handled entirely by the router's redirect
+    // (it watches authStateProvider via refreshListenable) — calling
+    // context.go here too would race with it and double-navigate.
     final authState = ref.read(authNotifierProvider);
     authState.whenOrNull(
-      data: (user) {
-        if (user != null) context.go(RouteNames.home);
-      },
-      error: (e, _) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text(e.toString().replaceAll('Exception: ', '')),
-            backgroundColor: AppColors.error,
-            behavior: SnackBarBehavior.floating,
-          ),
-        );
-      },
+      error: (e, _) => AppSnackbar.error(context, e),
     );
   }
 
   @override
   Widget build(BuildContext context) {
     final header = _roleHeader;
+    // authNotifierProvider is autoDispose; watching it here keeps it alive
+    // for as long as this screen is mounted, so the async signUp() call
+    // can still write its result to `state` after the network round trip
+    // completes (see login_screen.dart for the same fix).
+    ref.watch(authNotifierProvider);
 
     return Scaffold(
       body: SafeArea(
@@ -107,7 +116,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                 const SizedBox(height: AppSpacing.xl),
 
                 IconButton(
-                  onPressed: () => context.go(RouteNames.login),
+                  onPressed: () => context.safeBack(RouteNames.login),
                   icon: const Icon(Icons.arrow_back_rounded),
                   padding: EdgeInsets.zero,
                 ),
@@ -141,8 +150,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   hint: 'Ram Bahadur',
                   controller: _nameController,
                   prefixIcon: Icons.person_outline_rounded,
-                  validator: (v) =>
-                  v == null || v.isEmpty ? 'Full name is required' : null,
+                  validator: (v) => Validators.name(v, field: 'Full name'),
                 ),
 
                 const SizedBox(height: AppSpacing.md),
@@ -153,11 +161,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   controller: _emailController,
                   keyboardType: TextInputType.emailAddress,
                   prefixIcon: Icons.email_outlined,
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Email is required';
-                    if (!v.contains('@')) return 'Enter a valid email';
-                    return null;
-                  },
+                  validator: Validators.email,
                 ),
 
                 const SizedBox(height: AppSpacing.md),
@@ -168,8 +172,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   controller: _phoneController,
                   keyboardType: TextInputType.phone,
                   prefixIcon: Icons.phone_outlined,
-                  validator: (v) =>
-                  v == null || v.isEmpty ? 'Phone number is required' : null,
+                  validator: Validators.phone,
                 ),
 
                 const SizedBox(height: AppSpacing.md),
@@ -180,11 +183,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   controller: _passwordController,
                   isPassword: true,
                   prefixIcon: Icons.lock_outline_rounded,
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Password is required';
-                    if (v.length < 6) return 'Minimum 6 characters';
-                    return null;
-                  },
+                  validator: Validators.password,
                 ),
 
                 const SizedBox(height: AppSpacing.md),
@@ -195,12 +194,7 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
                   controller: _confirmPasswordController,
                   isPassword: true,
                   prefixIcon: Icons.lock_outline_rounded,
-                  validator: (v) {
-                    if (v == null || v.isEmpty) return 'Please confirm password';
-                    if (v != _passwordController.text)
-                      return 'Passwords do not match';
-                    return null;
-                  },
+                  validator: (v) => Validators.confirmPassword(v, _passwordController.text),
                 ),
 
                 const SizedBox(height: AppSpacing.lg),
@@ -244,41 +238,34 @@ class _SignupScreenState extends ConsumerState<SignupScreen> {
   }
 }
 
+class _RoleOption {
+  final UserRole role;
+  final IconData icon;
+  final String desc;
+
+  const _RoleOption({required this.role, required this.icon, required this.desc});
+}
+
 class _RoleSelector extends StatelessWidget {
-  final String selected;
-  final Function(String) onChanged;
+  final UserRole selected;
+  final ValueChanged<UserRole> onChanged;
 
   const _RoleSelector({required this.selected, required this.onChanged});
 
-  static const List<Map<String, dynamic>> _roles = [
-    {
-      'value': 'customer',
-      'label': 'Customer',
-      'icon': Icons.person_rounded,
-      'desc': 'Order food',
-    },
-    {
-      'value': 'restaurant',
-      'label': 'Restaurant',
-      'icon': Icons.store_rounded,
-      'desc': 'Sell food',
-    },
-    {
-      'value': 'rider',
-      'label': 'Rider',
-      'icon': Icons.delivery_dining_rounded,
-      'desc': 'Deliver food',
-    },
+  static const List<_RoleOption> _roles = [
+    _RoleOption(role: UserRole.customer, icon: Icons.person_rounded, desc: 'Order food'),
+    _RoleOption(role: UserRole.restaurant, icon: Icons.store_rounded, desc: 'Sell food'),
+    _RoleOption(role: UserRole.rider, icon: Icons.delivery_dining_rounded, desc: 'Deliver food'),
   ];
 
   @override
   Widget build(BuildContext context) {
     return Row(
-      children: _roles.map((role) {
-        final isSelected = selected == role['value'];
+      children: _roles.map((option) {
+        final isSelected = selected == option.role;
         return Expanded(
           child: GestureDetector(
-            onTap: () => onChanged(role['value'] as String),
+            onTap: () => onChanged(option.role),
             child: AnimatedContainer(
               duration: const Duration(milliseconds: 200),
               margin: const EdgeInsets.only(right: AppSpacing.sm),
@@ -286,33 +273,33 @@ class _RoleSelector extends StatelessWidget {
               decoration: BoxDecoration(
                 color: isSelected
                     ? AppColors.primary
-                    : AppColors.primary.withOpacity(0.06),
+                    : AppColors.primary.withValues(alpha: 0.06),
                 borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
                 border: Border.all(
                   color: isSelected
                       ? AppColors.primary
-                      : AppColors.primary.withOpacity(0.2),
+                      : AppColors.primary.withValues(alpha: 0.2),
                 ),
               ),
               child: Column(
                 children: [
                   Icon(
-                    role['icon'] as IconData,
+                    option.icon,
                     color: isSelected ? AppColors.white : AppColors.primary,
                     size: 24,
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    role['label'] as String,
+                    option.role.label,
                     style: AppTypography.labelSmall.copyWith(
                       color: isSelected ? AppColors.white : AppColors.primary,
                     ),
                   ),
                   Text(
-                    role['desc'] as String,
+                    option.desc,
                     style: AppTypography.bodySmall.copyWith(
                       color: isSelected
-                          ? AppColors.white.withOpacity(0.8)
+                          ? AppColors.white.withValues(alpha: 0.8)
                           : AppColors.textHint,
                       fontSize: 10,
                     ),

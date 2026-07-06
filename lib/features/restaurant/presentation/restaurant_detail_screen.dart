@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import 'package:cached_network_image/cached_network_image.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
@@ -9,6 +11,11 @@ import '../../cart/application/cart_notifier.dart';
 import '../../home/application/restaurant_provider.dart';
 import '../../home/domain/models/food_item_model.dart';
 import '../../home/domain/models/restaurant_model.dart';
+import '../../reviews/application/rating_provider.dart';
+import '../../reviews/domain/models/rating_model.dart';
+import '../../../shared/widgets/empty_state_view.dart';
+import '../../../shared/widgets/error_state_view.dart';
+import '../../../shared/widgets/loading_indicator.dart';
 
 class RestaurantDetailScreen extends ConsumerStatefulWidget {
   final String restaurantId;
@@ -33,6 +40,7 @@ class _RestaurantDetailScreenState
     'Veg',
     'Non-Veg',
     'Offers',
+    'Reviews',
   ];
 
   @override
@@ -53,86 +61,21 @@ class _RestaurantDetailScreenState
     super.dispose();
   }
 
+  // Carts can now hold items from more than one restaurant at once —
+  // adding always just adds to that restaurant's group in the cart
+  // (created on first item) instead of prompting to clear an existing
+  // cart from a different restaurant.
   void _onAddToCart(FoodItemModel item) {
-    final added =
     ref.read(cartNotifierProvider.notifier).addItem(item);
-
-    if (added) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${item.name} added to cart'),
-          backgroundColor: AppColors.primary,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius:
-            BorderRadius.circular(AppSpacing.radiusMd),
-          ),
-          duration: const Duration(seconds: 1),
-        ),
-      );
-    } else {
-      _showRestaurantConflictDialog(item);
-    }
-  }
-
-  void _showRestaurantConflictDialog(FoodItemModel item) {
-    final cartRestaurantName =
-        ref.read(cartNotifierProvider).restaurantName;
-
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${item.name} added to cart'),
+        backgroundColor: AppColors.primary,
+        behavior: SnackBarBehavior.floating,
         shape: RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.circular(AppSpacing.radiusLg),
+          borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
         ),
-        title: const Text('Start new order?'),
-        content: Text(
-          'You have items from $cartRestaurantName in your cart. '
-              'Each order can only be from one restaurant.\n\n'
-              'Clear your cart and start a new order from ${item.restaurantName}?',
-          style: AppTypography.bodyMedium,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Keep current cart'),
-          ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
-
-              ref
-                  .read(cartNotifierProvider.notifier)
-                  .clearCart();
-
-              ref
-                  .read(cartNotifierProvider.notifier)
-                  .addItem(item);
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${item.name} added to cart'),
-                  backgroundColor: AppColors.primary,
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      AppSpacing.radiusMd,
-                    ),
-                  ),
-                  duration: const Duration(seconds: 1),
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
-            ),
-            child: const Text(
-              'Start new order',
-              style: TextStyle(color: Colors.white),
-            ),
-          ),
-        ],
+        duration: const Duration(seconds: 1),
       ),
     );
   }
@@ -177,6 +120,32 @@ class _RestaurantDetailScreenState
         return _MenuList(
           items: filtered,
           onAddToCart: _onAddToCart,
+        );
+      },
+    );
+  }
+
+  Widget _buildReviewsTab() {
+    final ratingsAsync = ref.watch(restaurantRatingsProvider(widget.restaurantId));
+    return ratingsAsync.when(
+      loading: () => const AppLoader.fullscreen(),
+      error: (_, __) => AppErrorState(
+        message: 'Could not load reviews',
+        onRetry: () => ref.invalidate(restaurantRatingsProvider(widget.restaurantId)),
+      ),
+      data: (ratings) {
+        if (ratings.isEmpty) {
+          return const AppEmptyState(
+            icon: Icons.rate_review_outlined,
+            title: 'No reviews yet',
+            subtitle: 'Be the first to review this restaurant after your order.',
+          );
+        }
+        return ListView.separated(
+          padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
+          itemCount: ratings.length,
+          separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
+          itemBuilder: (_, i) => _ReviewTile(rating: ratings[i]),
         );
       },
     );
@@ -243,6 +212,7 @@ class _RestaurantDetailScreenState
                   null,
                   offersOnly: true,
                 ),
+                _buildReviewsTab(),
               ],
             ),
           ),
@@ -270,7 +240,7 @@ class _RestaurantDetailScreenState
               color: Colors.white,
               size: 20,
             ),
-            onPressed: () => Navigator.of(context).pop(),
+            onPressed: () => context.safeBack(),
           ),
         ),
       ),
@@ -278,10 +248,12 @@ class _RestaurantDetailScreenState
         background: Stack(
           fit: StackFit.expand,
           children: [
-            Image.network(
-              restaurant.imageUrl,
+            CachedNetworkImage(
+              imageUrl: restaurant.imageUrl,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
+              memCacheWidth: 900,
+              placeholder: (_, __) => Container(color: AppColors.border),
+              errorWidget: (_, __, ___) => Container(
                 color: AppColors.border,
                 child: const Icon(
                   Icons.restaurant_rounded,
@@ -587,26 +559,20 @@ class _FoodItemTile extends StatelessWidget {
                 borderRadius: BorderRadius.circular(
                   AppSpacing.radiusMd,
                 ),
-                child: Image.network(
-                  item.imageUrl,
+                child: CachedNetworkImage(
+                  imageUrl: item.imageUrl,
                   width: AppSpacing.menuItemImageSize,
                   height: AppSpacing.menuItemImageSize,
                   fit: BoxFit.cover,
-                  loadingBuilder:
-                      (context, child, progress) {
-                    if (progress == null) {
-                      return child;
-                    }
-
-                    return Container(
-                      width:
-                      AppSpacing.menuItemImageSize,
-                      height:
-                      AppSpacing.menuItemImageSize,
-                      color: AppColors.border,
-                    );
-                  },
-                  errorBuilder:
+                  // menuItemImageSize is a small thumbnail — no reason to
+                  // decode the source image at full resolution for it.
+                  memCacheWidth: (AppSpacing.menuItemImageSize * 2).round(),
+                  placeholder: (context, url) => Container(
+                    width: AppSpacing.menuItemImageSize,
+                    height: AppSpacing.menuItemImageSize,
+                    color: AppColors.border,
+                  ),
+                  errorWidget:
                       (_, __, ___) => Container(
                     width:
                     AppSpacing.menuItemImageSize,
@@ -770,6 +736,41 @@ class _FoodItemTile extends StatelessWidget {
               ),
             ],
           ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ReviewTile extends StatelessWidget {
+  final RatingModel rating;
+  const _ReviewTile({required this.rating});
+
+  @override
+  Widget build(BuildContext context) {
+    return GlassCard(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      borderRadius: AppSpacing.radiusLg,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text(rating.customerName ?? 'Anonymous', style: AppTypography.labelMedium),
+              Row(
+                children: List.generate(5, (i) => Icon(
+                  i < rating.rating ? Icons.star_rounded : Icons.star_outline_rounded,
+                  color: AppColors.accent,
+                  size: 16,
+                )),
+              ),
+            ],
+          ),
+          if (rating.review != null && rating.review!.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.xs),
+            Text(rating.review!, style: AppTypography.bodyMedium),
+          ],
         ],
       ),
     );

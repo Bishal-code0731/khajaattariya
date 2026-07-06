@@ -5,46 +5,44 @@ import '../domain/repositories/order_repository.dart';
 
 class OrderRepositoryImpl implements OrderRepository {
   @override
-  Future<OrderModel> placeOrder({
+  Future<List<OrderModel>> placeOrder({
     required CartState cart,
     required String customerId,
     String? deliveryAddress,
     String? notes,
   }) async {
     const deliveryFee = 30.0;
-    final totalAmount = cart.totalAmount + deliveryFee;
 
-    // Insert order
-    final orderData = await supabase
-        .from('orders')
-        .insert({
-      'customer_id': customerId,
-      'restaurant_id': cart.restaurantId,
-      'total_amount': totalAmount,
-      'delivery_fee': deliveryFee,
-      'delivery_address': deliveryAddress,
-      'notes': notes,
-      'status': 'pending',
-    })
-        .select()
-        .single();
-
-    final orderId = orderData['id'] as String;
-
-    // Insert order items
-    final orderItems = cart.items.map((cartItem) => {
-      'order_id': orderId,
-      'menu_item_id': cartItem.food.id,
-      'name': cartItem.food.name,
-      'price': cartItem.food.price,
-      'quantity': cartItem.quantity,
-      'subtotal': cartItem.totalPrice,
+    // Placed via the place_orders() Postgres function (see
+    // supabase_migration_place_orders_rpc.sql) so a multi-restaurant
+    // checkout is atomic — a failure partway through used to leave an
+    // orphaned order with no items, or skip later restaurant groups
+    // while earlier ones were already committed.
+    final groupsPayload = cart.groups.map((group) => {
+      'restaurant_id': group.restaurantId,
+      'items': group.items.map((cartItem) => {
+        'menu_item_id': cartItem.food.id,
+        'name': cartItem.food.name,
+        'price': cartItem.food.price,
+        'quantity': cartItem.quantity,
+        'subtotal': cartItem.totalPrice,
+      }).toList(),
     }).toList();
 
-    await supabase.from('order_items').insert(orderItems);
+    final rows = await supabase.rpc('place_orders', params: {
+      'p_customer_id': customerId,
+      'p_delivery_address': deliveryAddress,
+      'p_notes': notes,
+      'p_delivery_fee': deliveryFee,
+      'p_groups': groupsPayload,
+    }) as List;
 
-    // Return full order
-    return getOrderById(orderId);
+    final orderIds = rows.map((r) => (r as Map<String, dynamic>)['id'] as String);
+    final orders = <OrderModel>[];
+    for (final orderId in orderIds) {
+      orders.add(await getOrderById(orderId));
+    }
+    return orders;
   }
 
   @override

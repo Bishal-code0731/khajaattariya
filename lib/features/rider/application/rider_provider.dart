@@ -1,9 +1,13 @@
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod/riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../main.dart';
 import '../domain/models/rider_model.dart';
 import '../domain/models/rider_earning_model.dart';
 
-final riderProfileProvider = FutureProvider.family<RiderModel?, String>((ref, riderId) async {
+part 'rider_provider.g.dart';
+
+@Riverpod(keepAlive: true)
+Future<RiderModel?> riderProfile(Ref ref, String riderId) async {
   final data = await supabase
       .from('riders')
       .select('*, profiles(full_name, phone)')
@@ -11,27 +15,35 @@ final riderProfileProvider = FutureProvider.family<RiderModel?, String>((ref, ri
       .maybeSingle();
   if (data == null) return null;
   return RiderModel.fromMap(data);
-});
+}
 
-final riderOnlineNotifierProvider =
-StateNotifierProvider<RiderOnlineNotifier, AsyncValue<bool>>((ref) {
-  return RiderOnlineNotifier();
-});
-
-class RiderOnlineNotifier extends StateNotifier<AsyncValue<bool>> {
-  RiderOnlineNotifier() : super(const AsyncValue.data(false));
+@Riverpod(keepAlive: true)
+class RiderOnlineNotifier extends _$RiderOnlineNotifier {
+  @override
+  AsyncValue<bool> build() => const AsyncValue.data(false);
 
   Future<void> loadStatus(String riderId) async {
-    final data = await supabase
-        .from('riders').select('is_online').eq('id', riderId).maybeSingle();
-    state = AsyncValue.data(data?['is_online'] as bool? ?? false);
+    try {
+      final data = await supabase
+          .from('riders').select('is_online').eq('id', riderId).maybeSingle();
+      state = AsyncValue.data(data?['is_online'] as bool? ?? false);
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+    }
   }
 
   Future<void> toggle(String riderId) async {
     final current = state.valueOrNull ?? false;
     state = const AsyncValue.loading();
     try {
-      await supabase.from('riders').update({'is_online': !current}).eq('id', riderId);
+      final updated = await supabase
+          .from('riders')
+          .update({'is_online': !current})
+          .eq('id', riderId)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception('Could not update your status. Please try again.');
+      }
       state = AsyncValue.data(!current);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
@@ -39,48 +51,51 @@ class RiderOnlineNotifier extends StateNotifier<AsyncValue<bool>> {
   }
 }
 
-final riderEarningsProvider =
-FutureProvider.family<List<RiderEarningModel>, String>((ref, riderId) async {
+@Riverpod(keepAlive: true)
+Future<List<RiderEarningModel>> riderEarnings(Ref ref, String riderId) async {
   final data = await supabase
       .from('rider_earnings').select().eq('rider_id', riderId)
       .order('created_at', ascending: false);
   return (data as List)
       .map((m) => RiderEarningModel.fromMap(m as Map<String, dynamic>))
       .toList();
-});
+}
 
-final riderEarningsSummaryProvider =
-FutureProvider.family<Map<String, double>, String>((ref, riderId) async {
+@Riverpod(keepAlive: true)
+Future<Map<String, double>> riderEarningsSummary(Ref ref, String riderId) async {
   final data = await supabase
       .from('riders').select('total_deliveries, total_earnings').eq('id', riderId).single();
   return {
     'total_deliveries': (data['total_deliveries'] as num).toDouble(),
     'total_earnings': (data['total_earnings'] as num).toDouble(),
   };
-});
+}
 
-final allRidersProvider = FutureProvider<List<RiderModel>>((ref) async {
+@Riverpod(keepAlive: true)
+Future<List<RiderModel>> allRiders(Ref ref) async {
   final data = await supabase
       .from('riders').select('*, profiles(full_name, phone)')
       .order('created_at', ascending: false);
   return (data as List)
       .map((m) => RiderModel.fromMap(m as Map<String, dynamic>))
       .toList();
-});
+}
 
-final riderApprovalNotifierProvider =
-StateNotifierProvider<RiderApprovalNotifier, AsyncValue<void>>((ref) {
-  return RiderApprovalNotifier();
-});
-
-class RiderApprovalNotifier extends StateNotifier<AsyncValue<void>> {
-  RiderApprovalNotifier() : super(const AsyncValue.data(null));
+@Riverpod(keepAlive: true)
+class RiderApprovalNotifier extends _$RiderApprovalNotifier {
+  @override
+  AsyncValue<void> build() => const AsyncValue.data(null);
 
   Future<bool> approveRider(String riderId) async {
     state = const AsyncValue.loading();
     try {
-      await supabase.from('riders')
-          .update({'is_approved': true, 'approval_note': null}).eq('id', riderId);
+      final updated = await supabase.from('riders')
+          .update({'is_approved': true, 'approval_note': null})
+          .eq('id', riderId)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception('Could not approve rider. Please try again.');
+      }
       state = const AsyncValue.data(null);
       return true;
     } catch (e, st) { state = AsyncValue.error(e, st); return false; }
@@ -89,21 +104,23 @@ class RiderApprovalNotifier extends StateNotifier<AsyncValue<void>> {
   Future<bool> rejectRider(String riderId, String note) async {
     state = const AsyncValue.loading();
     try {
-      await supabase.from('riders')
-          .update({'is_approved': false, 'approval_note': note}).eq('id', riderId);
+      final updated = await supabase.from('riders')
+          .update({'is_approved': false, 'approval_note': note})
+          .eq('id', riderId)
+          .select('id');
+      if (updated.isEmpty) {
+        throw Exception('Could not reject rider. Please try again.');
+      }
       state = const AsyncValue.data(null);
       return true;
     } catch (e, st) { state = AsyncValue.error(e, st); return false; }
   }
 }
 
-final riderRegistrationProvider =
-StateNotifierProvider<RiderRegistrationNotifier, AsyncValue<void>>((ref) {
-  return RiderRegistrationNotifier();
-});
-
-class RiderRegistrationNotifier extends StateNotifier<AsyncValue<void>> {
-  RiderRegistrationNotifier() : super(const AsyncValue.data(null));
+@Riverpod(keepAlive: true)
+class RiderRegistration extends _$RiderRegistration {
+  @override
+  AsyncValue<void> build() => const AsyncValue.data(null);
 
   Future<bool> register({
     required String riderId,

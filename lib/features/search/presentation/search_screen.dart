@@ -1,14 +1,21 @@
+import 'dart:async';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../main.dart';
+import '../../../shared/widgets/empty_state_view.dart';
 import '../../../shared/widgets/glass_card.dart';
+import '../../../shared/widgets/shimmer_loader.dart';
 import '../../home/domain/models/food_item_model.dart';
 import '../../home/domain/models/restaurant_model.dart';
+
+part 'search_screen.g.dart';
 
 // Search results state
 class SearchResults {
@@ -24,27 +31,33 @@ class SearchResults {
 }
 
 // Search notifier with debounce
-final searchProvider =
-StateNotifierProvider<SearchNotifier, AsyncValue<SearchResults>>(
-      (ref) => SearchNotifier(),
-);
+@Riverpod(keepAlive: true)
+class Search extends _$Search {
+  @override
+  AsyncValue<SearchResults> build() => const AsyncValue.data(SearchResults());
 
-class SearchNotifier extends StateNotifier<AsyncValue<SearchResults>> {
-  SearchNotifier() : super(const AsyncValue.data(SearchResults()));
-
-  // Track last query to avoid stale results
+  // Dedupes identical repeated queries...
   String _lastQuery = '';
+  // ...while _requestId guards the async gap: if the user types again (or
+  // clears) before this request's queries resolve, the stale response is
+  // dropped instead of overwriting newer results ("request cancellation"
+  // — Supabase's client doesn't expose a real abort, so we ignore the
+  // result instead of racing it into state).
+  int _requestId = 0;
 
   Future<void> search(String query) async {
     final trimmed = query.trim();
 
     if (trimmed.isEmpty) {
+      _requestId++;
+      _lastQuery = '';
       state = const AsyncValue.data(SearchResults());
       return;
     }
 
     if (trimmed == _lastQuery) return;
     _lastQuery = trimmed;
+    final requestId = ++_requestId;
 
     state = const AsyncValue.loading();
     try {
@@ -65,8 +78,7 @@ class SearchNotifier extends StateNotifier<AsyncValue<SearchResults>> {
             .limit(15),
       ]);
 
-      // Only update if query hasn't changed during fetch
-      if (_lastQuery != trimmed) return;
+      if (requestId != _requestId) return; // superseded — drop this result
 
       final restaurants = (results[0] as List)
           .map((m) => RestaurantModel.fromMap(m))
@@ -80,11 +92,17 @@ class SearchNotifier extends StateNotifier<AsyncValue<SearchResults>> {
         SearchResults(restaurants: restaurants, foodItems: foodItems),
       );
     } catch (e) {
+      if (requestId != _requestId) return;
+      // Reset _lastQuery on failure — otherwise retyping the exact same
+      // text after a transient error (the common case) short-circuits at
+      // the `trimmed == _lastQuery` guard above and never retries.
+      _lastQuery = '';
       state = AsyncValue.error(e, StackTrace.current);
     }
   }
 
   void clear() {
+    _requestId++;
     _lastQuery = '';
     state = const AsyncValue.data(SearchResults());
   }
@@ -101,8 +119,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   final _controller = TextEditingController();
   final _focusNode = FocusNode();
 
-  // Debounce timer
-  DateTime? _lastTyped;
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -115,6 +132,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     ref.read(searchProvider.notifier).clear();
@@ -122,13 +140,12 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
   }
 
   void _onChanged(String value) {
-    _lastTyped = DateTime.now();
-    final typed = _lastTyped;
-
-    Future.delayed(const Duration(milliseconds: 400), () {
-      if (_lastTyped == typed && mounted) {
-        ref.read(searchProvider.notifier).search(value);
-      }
+    // A single cancellable Timer instead of spawning a new Future.delayed
+    // per keystroke — the old approach left N pending futures alive (each
+    // still doing a timestamp comparison) for every character typed.
+    _debounce?.cancel();
+    _debounce = Timer(const Duration(milliseconds: 400), () {
+      if (mounted) ref.read(searchProvider.notifier).search(value);
     });
   }
 
@@ -141,7 +158,7 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
       appBar: AppBar(
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go(RouteNames.home),
+          onPressed: () => context.safeBack(),
         ),
         title: TextField(
           controller: _controller,
@@ -174,70 +191,27 @@ class _SearchScreenState extends ConsumerState<SearchScreen> {
         ),
       ),
       body: searchState.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(
-            color: AppColors.primary,
-            strokeWidth: 2,
-          ),
-        ),
+        loading: () => const AppShimmerCardList(count: 5, itemHeight: 56),
         error: (_, __) => Center(
           child: Text('Search failed. Try again.',
               style: AppTypography.bodyMedium),
         ),
         data: (results) {
           if (_controller.text.trim().isEmpty) {
-            return _EmptySearch();
+            return const AppEmptyState(
+              icon: Icons.search_rounded,
+              title: 'Search for restaurants or food',
+            );
           }
           if (results.isEmpty) {
-            return _NoResults(query: _controller.text.trim());
+            return AppEmptyState(
+              icon: Icons.search_off_rounded,
+              title: 'No results for "${_controller.text.trim()}"',
+              subtitle: 'Try a different search term',
+            );
           }
           return _SearchResults(results: results);
         },
-      ),
-    );
-  }
-}
-
-class _EmptySearch extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.search_rounded,
-              size: 64, color: AppColors.textHint),
-          const SizedBox(height: AppSpacing.md),
-          Text('Search for restaurants or food',
-              style: AppTypography.bodyMedium
-                  .copyWith(color: AppColors.textSecondary)),
-        ],
-      ),
-    );
-  }
-}
-
-class _NoResults extends StatelessWidget {
-  final String query;
-
-  const _NoResults({required this.query});
-
-  @override
-  Widget build(BuildContext context) {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          const Icon(Icons.search_off_rounded,
-              size: 64, color: AppColors.textHint),
-          const SizedBox(height: AppSpacing.md),
-          Text('No results for "$query"',
-              style: AppTypography.headingSmall),
-          const SizedBox(height: AppSpacing.sm),
-          Text('Try a different search term',
-              style: AppTypography.bodyMedium
-                  .copyWith(color: AppColors.textSecondary)),
-        ],
       ),
     );
   }
@@ -303,17 +277,19 @@ class _RestaurantResultTile extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.sm),
       borderRadius: AppSpacing.radiusLg,
       onTap: () =>
-          context.go('${RouteNames.restaurant}/${restaurant.id}'),
+          context.pushOnce('${RouteNames.restaurant}/${restaurant.id}'),
       child: Row(
         children: [
           ClipRRect(
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            child: Image.network(
-              restaurant.imageUrl,
+            child: CachedNetworkImage(
+              imageUrl: restaurant.imageUrl,
               width: 56,
               height: 56,
               fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
+              memCacheWidth: 112,
+              placeholder: (_, __) => Container(width: 56, height: 56, color: AppColors.border),
+              errorWidget: (_, __, ___) => Container(
                 width: 56,
                 height: 56,
                 color: AppColors.border,
@@ -359,7 +335,7 @@ class _RestaurantResultTile extends StatelessWidget {
               padding: const EdgeInsets.symmetric(
                   horizontal: AppSpacing.xs, vertical: 2),
               decoration: BoxDecoration(
-                color: AppColors.error.withOpacity(0.1),
+                color: AppColors.error.withValues(alpha: 0.1),
                 borderRadius:
                 BorderRadius.circular(AppSpacing.radiusSm),
               ),
@@ -388,7 +364,7 @@ class _FoodResultTile extends StatelessWidget {
       padding: const EdgeInsets.all(AppSpacing.sm),
       borderRadius: AppSpacing.radiusLg,
       onTap: () =>
-          context.go('${RouteNames.restaurant}/${food.restaurantId}'),
+          context.pushOnce('${RouteNames.restaurant}/${food.restaurantId}'),
       child: Row(
         children: [
           Stack(
@@ -396,12 +372,15 @@ class _FoodResultTile extends StatelessWidget {
               ClipRRect(
                 borderRadius:
                 BorderRadius.circular(AppSpacing.radiusMd),
-                child: Image.network(
-                  food.imageUrl,
+                child: CachedNetworkImage(
+                  imageUrl: food.imageUrl,
                   width: 56,
                   height: 56,
                   fit: BoxFit.cover,
-                  errorBuilder: (_, __, ___) => Container(
+                  memCacheWidth: 112,
+                  placeholder: (_, __) =>
+                      Container(width: 56, height: 56, color: AppColors.border),
+                  errorWidget: (_, __, ___) => Container(
                     width: 56,
                     height: 56,
                     color: AppColors.border,

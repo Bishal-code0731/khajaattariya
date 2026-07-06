@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
@@ -7,8 +9,13 @@ import '../../../features/auth/application/auth_provider.dart';
 import '../../../features/orders/application/order_provider.dart';
 import '../../../features/orders/domain/models/order_model.dart';
 import '../../../features/rider/application/rider_provider.dart';
-import '../../../features/rider/domain/models/rider_model.dart';
+import '../../../features/tracking/application/tracking_provider.dart';
+import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/empty_state_view.dart';
+import '../../../shared/widgets/order_items_list.dart';
 import '../../../shared/widgets/glass_card.dart';
+import '../../../shared/widgets/loading_indicator.dart';
+import 'rider_schedule_gantt_view.dart';
 
 class RiderDashboardScreen extends ConsumerStatefulWidget {
   const RiderDashboardScreen({super.key});
@@ -20,15 +27,12 @@ class RiderDashboardScreen extends ConsumerStatefulWidget {
 class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
     with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  String? _statusLoadedFor;
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 3, vsync: this);
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      final user = ref.read(authStateProvider).valueOrNull;
-      if (user != null) ref.read(riderOnlineNotifierProvider.notifier).loadStatus(user.id);
-    });
+    _tabController = TabController(length: 4, vsync: this);
   }
 
   @override
@@ -36,11 +40,42 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
 
   @override
   Widget build(BuildContext context) {
-    final user = ref.watch(authStateProvider).valueOrNull;
-    if (user == null) return const Scaffold(body: Center(child: CircularProgressIndicator()));
+    final authState = ref.watch(authStateProvider);
+    if (authState.isLoading) {
+      return const Scaffold(body: AppLoader.fullscreen());
+    }
+    final user = authState.valueOrNull;
+    if (user == null) {
+      return Scaffold(
+        body: AppEmptyState(
+          icon: Icons.lock_outline_rounded,
+          title: 'Please log in',
+          subtitle: 'Log in as a rider to view your dashboard.',
+          action: FilledButton(
+            onPressed: () => context.go(RouteNames.login),
+            child: const Text('Go to Login'),
+          ),
+        ),
+      );
+    }
+
+    // Auth can still be resolving on the first frame (session restore), so
+    // this is keyed off the resolved user rather than a one-shot
+    // initState callback — otherwise loadStatus() never fires if auth
+    // wasn't ready yet and the rider sees a stale "Offline" forever.
+    if (_statusLoadedFor != user.id) {
+      _statusLoadedFor = user.id;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        ref.read(riderOnlineNotifierProvider.notifier).loadStatus(user.id);
+      });
+    }
 
     final onlineState = ref.watch(riderOnlineNotifierProvider);
     final isOnline = onlineState.valueOrNull ?? false;
+    // Only an approved rider should be able to go online and see/accept
+    // live orders — the profile fetch is cheap (cached FutureProvider)
+    // and re-checked on every rebuild of this screen.
+    final isApproved = ref.watch(riderProfileProvider(user.id)).valueOrNull?.isApproved ?? false;
 
     return Scaffold(
       backgroundColor: Theme.of(context).scaffoldBackgroundColor,
@@ -49,7 +84,12 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
         actions: [
           IconButton(
             icon: const Icon(Icons.logout_rounded),
-            onPressed: () => ref.read(authNotifierProvider.notifier).signOut(),
+            onPressed: () {
+              // A rider going offline mid-session shouldn't keep pinging
+              // GPS location under a now-signed-out session.
+              ref.read(riderLocationBroadcasterProvider.notifier).stop();
+              ref.read(authNotifierProvider.notifier).signOut();
+            },
           ),
         ],
         bottom: TabBar(
@@ -58,19 +98,25 @@ class _RiderDashboardScreenState extends ConsumerState<RiderDashboardScreen>
           unselectedLabelColor: AppColors.textSecondary,
           indicatorColor: AppColors.primary,
           dividerColor: AppColors.border,
-          tabs: const [Tab(text: 'Deliveries'), Tab(text: 'Earnings'), Tab(text: 'Profile')],
+          isScrollable: true,
+          tabAlignment: TabAlignment.start,
+          tabs: const [Tab(text: 'Deliveries'), Tab(text: 'Schedule'), Tab(text: 'Earnings'), Tab(text: 'Profile')],
         ),
       ),
       body: TabBarView(
         controller: _tabController,
         children: [
           _DeliveriesTab(userId: user.id, isOnline: isOnline),
+          SingleChildScrollView(
+            padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
+            child: RiderScheduleGanttView(riderId: user.id),
+          ),
           _EarningsTab(userId: user.id),
           _RiderProfileTab(userId: user.id),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: onlineState.isLoading
+        onPressed: (onlineState.isLoading || !isApproved)
             ? null
             : () => ref.read(riderOnlineNotifierProvider.notifier).toggle(user.id),
         backgroundColor: isOnline ? AppColors.success : AppColors.textSecondary,
@@ -92,6 +138,18 @@ class _DeliveriesTab extends ConsumerWidget {
     final availableAsync = ref.watch(availableOrdersProvider);
     final activeAsync = ref.watch(riderActiveOrderProvider(userId));
 
+    // Broadcast this rider's location on a throttled interval while they
+    // have an order picked up, so the customer's tracking map stays live.
+    ref.listen<AsyncValue<OrderModel?>>(riderActiveOrderProvider(userId), (_, next) {
+      final order = next.valueOrNull;
+      final broadcaster = ref.read(riderLocationBroadcasterProvider.notifier);
+      if (order != null && order.status == OrderStatus.pickedUp) {
+        broadcaster.start(orderId: order.id, riderId: userId);
+      } else {
+        broadcaster.stop();
+      }
+    });
+
     return CustomScrollView(slivers: [
       SliverToBoxAdapter(
         child: AnimatedContainer(
@@ -99,7 +157,7 @@ class _DeliveriesTab extends ConsumerWidget {
           margin: const EdgeInsets.all(AppSpacing.screenHorizontal),
           padding: const EdgeInsets.all(AppSpacing.md),
           decoration: BoxDecoration(
-            color: isOnline ? AppColors.successLight : AppColors.border.withOpacity(0.5),
+            color: isOnline ? AppColors.successLight : AppColors.border.withValues(alpha: 0.5),
             borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           ),
           child: Row(children: [
@@ -251,7 +309,7 @@ class _EarningsTab extends ConsumerWidget {
                 padding: const EdgeInsets.all(AppSpacing.md), borderRadius: AppSpacing.radiusMd,
                 child: Row(children: [
                   Container(width: 36, height: 36,
-                      decoration: BoxDecoration(color: AppColors.success.withOpacity(0.1), shape: BoxShape.circle),
+                      decoration: BoxDecoration(color: AppColors.success.withValues(alpha: 0.1), shape: BoxShape.circle),
                       child: const Icon(Icons.check_rounded, color: AppColors.success, size: 18)),
                   const SizedBox(width: AppSpacing.md),
                   Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -289,7 +347,7 @@ class _RiderProfileTab extends ConsumerWidget {
           children: [
             const SizedBox(height: AppSpacing.md),
             Center(child: CircleAvatar(
-              radius: 40, backgroundColor: AppColors.riderColor.withOpacity(0.15),
+              radius: 40, backgroundColor: AppColors.riderColor.withValues(alpha: 0.15),
               child: Text(rider.fullName.isNotEmpty ? rider.fullName[0].toUpperCase() : 'R',
                   style: AppTypography.headingLarge.copyWith(color: AppColors.riderColor)),
             )),
@@ -360,28 +418,22 @@ class _RiderRegistrationViewState extends ConsumerState<_RiderRegistrationView> 
         TextField(controller: _vehicleNumberCtrl,
             decoration: const InputDecoration(labelText: 'Vehicle Number (optional)', hintText: 'e.g. BA 1 CHA 2345')),
         const SizedBox(height: AppSpacing.xl),
-        SizedBox(width: double.infinity,
-          child: ElevatedButton(
-            onPressed: registrationState.isLoading ? null : () async {
-              final success = await ref.read(riderRegistrationProvider.notifier).register(
-                riderId: widget.userId, vehicleType: _vehicleType,
-                vehicleNumber: _vehicleNumberCtrl.text.trim().isEmpty ? null : _vehicleNumberCtrl.text.trim(),
-              );
-              if (success && context.mounted) {
-                ref.invalidate(riderProfileProvider(widget.userId));
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                  content: Text('Profile submitted! Awaiting admin approval.'),
-                  backgroundColor: AppColors.success, behavior: SnackBarBehavior.floating,
-                ));
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary,
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusMd))),
-            child: registrationState.isLoading
-                ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Submit for Approval', style: TextStyle(color: Colors.white)),
-          ),
+        AppButton(
+          label: 'Submit for Approval',
+          isLoading: registrationState.isLoading,
+          onPressed: () async {
+            final success = await ref.read(riderRegistrationProvider.notifier).register(
+              riderId: widget.userId, vehicleType: _vehicleType,
+              vehicleNumber: _vehicleNumberCtrl.text.trim().isEmpty ? null : _vehicleNumberCtrl.text.trim(),
+            );
+            if (success && context.mounted) {
+              ref.invalidate(riderProfileProvider(widget.userId));
+              ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('Profile submitted! Awaiting admin approval.'),
+                backgroundColor: AppColors.success, behavior: SnackBarBehavior.floating,
+              ));
+            }
+          },
         ),
       ],
     );
@@ -438,7 +490,7 @@ class _ActiveDeliveryCard extends ConsumerWidget {
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Container(width: 40, height: 40,
-                decoration: BoxDecoration(color: AppColors.success.withOpacity(0.1), shape: BoxShape.circle),
+                decoration: BoxDecoration(color: AppColors.success.withValues(alpha: 0.1), shape: BoxShape.circle),
                 child: const Icon(Icons.delivery_dining_rounded, color: AppColors.success)),
             const SizedBox(width: AppSpacing.sm),
             Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
@@ -449,13 +501,7 @@ class _ActiveDeliveryCard extends ConsumerWidget {
           const SizedBox(height: AppSpacing.sm),
           const Divider(height: 1),
           const SizedBox(height: AppSpacing.sm),
-          ...order.items.map((item) => Padding(
-            padding: const EdgeInsets.only(bottom: 2),
-            child: Row(children: [
-              Text('${item.quantity}×  ', style: AppTypography.labelSmall.copyWith(color: AppColors.primary)),
-              Expanded(child: Text(item.name, style: AppTypography.bodySmall)),
-            ]),
-          )),
+          OrderItemsList(items: order.items),
           if (order.deliveryAddress != null) ...[
             const SizedBox(height: AppSpacing.sm),
             Row(children: [
@@ -466,24 +512,19 @@ class _ActiveDeliveryCard extends ConsumerWidget {
           ],
           const SizedBox(height: AppSpacing.sm),
           if (order.status == OrderStatus.pickedUp)
-            SizedBox(width: double.infinity,
-              child: ElevatedButton(
-                onPressed: isUpdating ? null : () async {
-                  final success = await ref.read(orderStatusNotifierProvider.notifier)
-                      .updateStatus(order.id, OrderStatus.delivered);
-                  if (!success && context.mounted) {
-                    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                        content: Text('Failed to update'), backgroundColor: AppColors.error,
-                        behavior: SnackBarBehavior.floating));
-                  }
-                },
-                style: ElevatedButton.styleFrom(backgroundColor: AppColors.success,
-                    padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusMd))),
-                child: isUpdating
-                    ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                    : const Text('Mark as Delivered', style: TextStyle(color: Colors.white)),
-              ),
+            AppButton(
+              label: 'Mark as Delivered',
+              color: AppColors.success,
+              isLoading: isUpdating,
+              onPressed: () async {
+                final success = await ref.read(orderStatusNotifierProvider.notifier)
+                    .updateStatus(order.id, OrderStatus.delivered);
+                if (!success && context.mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                      content: Text('Failed to update'), backgroundColor: AppColors.error,
+                      behavior: SnackBarBehavior.floating));
+                }
+              },
             ),
         ]),
       ),
@@ -498,6 +539,7 @@ class _AvailableOrderCard extends ConsumerWidget {
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final isUpdating = ref.watch(orderStatusNotifierProvider).isLoading;
+    final isApproved = ref.watch(riderProfileProvider(riderId)).valueOrNull?.isApproved ?? false;
     return GlassCard(
       margin: const EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal, vertical: AppSpacing.xs),
       padding: const EdgeInsets.all(AppSpacing.md), borderRadius: AppSpacing.radiusLg,
@@ -521,24 +563,20 @@ class _AvailableOrderCard extends ConsumerWidget {
           ]),
         ],
         const SizedBox(height: AppSpacing.sm),
-        SizedBox(width: double.infinity,
-          child: ElevatedButton(
-            onPressed: isUpdating ? null : () async {
-              final success = await ref.read(orderStatusNotifierProvider.notifier)
-                  .assignRider(order.id, riderId);
-              if (!success && context.mounted) {
-                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
-                    content: Text('Failed to accept order'), backgroundColor: AppColors.error,
-                    behavior: SnackBarBehavior.floating));
-              }
-            },
-            style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary,
-                padding: const EdgeInsets.symmetric(vertical: AppSpacing.sm),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusMd))),
-            child: isUpdating
-                ? const SizedBox(height: 18, width: 18, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Accept & Pick Up', style: TextStyle(color: Colors.white)),
-          ),
+        AppButton(
+          label: 'Accept & Pick Up',
+          isLoading: isUpdating,
+          onPressed: !isApproved ? null : () async {
+            final success = await ref.read(orderStatusNotifierProvider.notifier)
+                .assignRider(order.id, riderId);
+            if (!success && context.mounted) {
+              final error = ref.read(orderStatusNotifierProvider).error;
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+                  content: Text(error?.toString().replaceFirst('Exception: ', '') ?? 'Failed to accept order'),
+                  backgroundColor: AppColors.error,
+                  behavior: SnackBarBehavior.floating));
+            }
+          },
         ),
       ]),
     );

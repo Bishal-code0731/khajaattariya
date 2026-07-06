@@ -1,24 +1,87 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../features/auth/application/auth_provider.dart';
+import '../../../shared/widgets/empty_state_view.dart';
+import '../../../shared/widgets/error_state_view.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/glass_card.dart';
+import '../../../shared/widgets/shimmer_loader.dart';
 import '../application/notification_provider.dart';
 import '../domain/models/notification_model.dart';
 
-class NotificationsScreen extends ConsumerWidget {
+class NotificationsScreen extends ConsumerStatefulWidget {
   const NotificationsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<NotificationsScreen> createState() => _NotificationsScreenState();
+}
+
+class _NotificationsScreenState extends ConsumerState<NotificationsScreen> {
+  // Guards against double-tapping "Mark all read" (or tapping a
+  // notification twice before its markRead call resolves) firing the
+  // same bulk update twice.
+  bool _isMarkingAllRead = false;
+  final _markingReadIds = <String>{};
+
+  Future<void> _markAllRead(String userId, NotificationActions actions) async {
+    if (_isMarkingAllRead) return;
+    setState(() => _isMarkingAllRead = true);
+    try {
+      await actions.markAllRead(userId);
+    } finally {
+      if (mounted) setState(() => _isMarkingAllRead = false);
+    }
+  }
+
+  Future<void> _markRead(String id, NotificationActions actions) async {
+    if (_markingReadIds.contains(id)) return;
+    _markingReadIds.add(id);
+    try {
+      await actions.markRead(id);
+    } catch (e) {
+      if (mounted) AppSnackbar.error(context, 'Could not mark as read');
+    } finally {
+      _markingReadIds.remove(id);
+    }
+  }
+
+  Future<void> _deleteNotification(String id, NotificationActions actions) async {
+    try {
+      await actions.deleteNotification(id);
+    } catch (e) {
+      // The Dismissible already removed the tile optimistically; a
+      // failed delete means it'll reappear on the next stream emission,
+      // which is confusing without this explaining why.
+      if (mounted) AppSnackbar.error(context, 'Could not delete notification — it will reappear');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(authStateProvider).valueOrNull;
     if (user == null) {
-      return const Scaffold(
-        body: Center(child: Text('Please log in to view notifications')),
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Notifications'),
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back_rounded),
+            onPressed: () => context.safeBack(),
+          ),
+        ),
+        body: AppEmptyState(
+          icon: Icons.lock_outline_rounded,
+          title: 'Please login to view notifications',
+          action: TextButton(
+            onPressed: () => context.push(RouteNames.login),
+            child: const Text('Login'),
+          ),
+        ),
       );
     }
 
@@ -31,39 +94,33 @@ class NotificationsScreen extends ConsumerWidget {
         title: const Text('Notifications'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go(RouteNames.home),
+          onPressed: () => context.safeBack(),
         ),
         actions: [
           TextButton(
-            onPressed: () => actions.markAllRead(user.id),
-            child: const Text('Mark all read'),
+            onPressed: _isMarkingAllRead ? null : () => _markAllRead(user.id, actions),
+            child: _isMarkingAllRead
+                ? const SizedBox(
+                    height: 14,
+                    width: 14,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Text('Mark all read'),
           ),
         ],
       ),
       body: notificationsAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-        error: (_, __) => const Center(
-          child: Text('Could not load notifications'),
+        loading: () => const AppShimmerCardList(itemHeight: 40),
+        error: (_, __) => AppErrorState(
+          message: 'Could not load notifications',
+          onRetry: () => ref.invalidate(notificationsProvider(user.id)),
         ),
         data: (notifications) {
           if (notifications.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.notifications_none_rounded,
-                      size: 64, color: AppColors.textHint),
-                  const SizedBox(height: AppSpacing.md),
-                  Text('No notifications yet',
-                      style: AppTypography.headingSmall
-                          .copyWith(color: AppColors.textSecondary)),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text('You\'re all caught up!',
-                      style: AppTypography.bodyMedium),
-                ],
-              ),
+            return const AppEmptyState(
+              icon: Icons.notifications_none_rounded,
+              title: 'No notifications yet',
+              subtitle: "You're all caught up!",
             );
           }
 
@@ -80,13 +137,13 @@ class NotificationsScreen extends ConsumerWidget {
               return _NotificationTile(
                 notification: n,
                 onTap: () {
-                  if (!n.isRead) actions.markRead(n.id);
+                  if (!n.isRead) _markRead(n.id, actions);
                   if (n.orderId != null) {
-                    context.push(
+                    context.pushOnce(
                         '${RouteNames.orderDetail}/${n.orderId}');
                   }
                 },
-                onDismiss: () => actions.deleteNotification(n.id),
+                onDismiss: () => _deleteNotification(n.id, actions),
               );
             },
           );

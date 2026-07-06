@@ -3,20 +3,43 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/utils/validators.dart';
 import '../../../features/auth/application/auth_provider.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/app_text_field.dart';
+import '../../../shared/widgets/async_value_view.dart';
+import '../../../shared/widgets/empty_state_view.dart';
 import '../../../shared/widgets/glass_card.dart';
 import '../application/address_provider.dart';
 import '../domain/models/address_model.dart';
 
-class AddressBookScreen extends ConsumerWidget {
+class AddressBookScreen extends ConsumerStatefulWidget {
   const AddressBookScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<AddressBookScreen> createState() => _AddressBookScreenState();
+}
+
+class _AddressBookScreenState extends ConsumerState<AddressBookScreen> {
+  // Which address rows have a set-default/delete request in flight —
+  // only that row's action chips are disabled, everything else in the
+  // list stays interactive.
+  final _busyAddressIds = <String>{};
+
+  @override
+  Widget build(BuildContext context) {
     final user = ref.watch(authStateProvider).valueOrNull;
-    if (user == null) return const Scaffold();
+    if (user == null) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('Address Book')),
+        body: const AppEmptyState(
+          icon: Icons.lock_outline_rounded,
+          title: 'Please log in',
+          subtitle: 'Log in to view and manage your addresses.',
+        ),
+      );
+    }
 
     final addressesAsync = ref.watch(addressListProvider(user.id));
     final notifier = ref.read(addressNotifierProvider.notifier);
@@ -42,29 +65,16 @@ class AddressBookScreen extends ConsumerWidget {
             style: AppTypography.labelMedium
                 .copyWith(color: Colors.white)),
       ),
-      body: addressesAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-        error: (_, __) =>
-        const Center(child: Text('Could not load addresses')),
+      body: AsyncValueView(
+        value: addressesAsync,
+        errorMessage: 'Could not load addresses',
+        onRetry: () => ref.invalidate(addressListProvider(user.id)),
         data: (addresses) {
           if (addresses.isEmpty) {
-            return Center(
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(Icons.location_off_outlined,
-                      size: 64, color: AppColors.textHint),
-                  const SizedBox(height: AppSpacing.md),
-                  Text('No saved addresses',
-                      style: AppTypography.headingSmall
-                          .copyWith(color: AppColors.textSecondary)),
-                  const SizedBox(height: AppSpacing.xs),
-                  Text('Add your delivery addresses',
-                      style: AppTypography.bodyMedium),
-                ],
-              ),
+            return const AppEmptyState(
+              icon: Icons.location_off_outlined,
+              title: 'No saved addresses',
+              subtitle: 'Add your delivery addresses',
             );
           }
 
@@ -78,19 +88,37 @@ class AddressBookScreen extends ConsumerWidget {
             const SizedBox(height: AppSpacing.sm),
             itemBuilder: (context, index) {
               final address = addresses[index];
+              final isBusy = _busyAddressIds.contains(address.id);
               return _AddressTile(
                 address: address,
-                onSetDefault: () => notifier.setDefault(
-                  addressId: address.id,
-                  userId: user.id,
-                ),
+                isBusy: isBusy,
+                onSetDefault: isBusy ? null : () async {
+                  setState(() => _busyAddressIds.add(address.id));
+                  final ok = await notifier.setDefault(
+                    addressId: address.id,
+                    userId: user.id,
+                  );
+                  if (!context.mounted) return;
+                  setState(() => _busyAddressIds.remove(address.id));
+                  if (!ok) AppSnackbar.error(context, 'Could not set default address');
+                },
                 onEdit: () => _showAddressSheet(
                   context: context,
                   ref: ref,
                   userId: user.id,
                   existing: address,
                 ),
-                onDelete: () => notifier.deleteAddress(address.id),
+                onDelete: isBusy ? null : () async {
+                  setState(() => _busyAddressIds.add(address.id));
+                  final ok = await notifier.deleteAddress(address.id, user.id);
+                  if (!context.mounted) return;
+                  setState(() => _busyAddressIds.remove(address.id));
+                  if (ok) {
+                    AppSnackbar.success(context, 'Address deleted');
+                  } else {
+                    AppSnackbar.error(context, 'Could not delete address');
+                  }
+                },
               );
             },
           );
@@ -120,12 +148,14 @@ class AddressBookScreen extends ConsumerWidget {
 
 class _AddressTile extends StatelessWidget {
   final AddressModel address;
-  final VoidCallback onSetDefault;
+  final bool isBusy;
+  final VoidCallback? onSetDefault;
   final VoidCallback onEdit;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
 
   const _AddressTile({
     required this.address,
+    required this.isBusy,
     required this.onSetDefault,
     required this.onEdit,
     required this.onDelete,
@@ -204,6 +234,7 @@ class _AddressTile extends StatelessWidget {
                         icon: Icons.check_circle_outline_rounded,
                         color: AppColors.success,
                         onTap: onSetDefault,
+                        isBusy: isBusy,
                       ),
                     if (!address.isDefault)
                       const SizedBox(width: AppSpacing.sm),
@@ -211,7 +242,7 @@ class _AddressTile extends StatelessWidget {
                       label: 'Edit',
                       icon: Icons.edit_outlined,
                       color: AppColors.info,
-                      onTap: onEdit,
+                      onTap: isBusy ? null : onEdit,
                     ),
                     const SizedBox(width: AppSpacing.sm),
                     _ActionChip(
@@ -219,6 +250,7 @@ class _AddressTile extends StatelessWidget {
                       icon: Icons.delete_outline_rounded,
                       color: AppColors.error,
                       onTap: onDelete,
+                      isBusy: isBusy,
                     ),
                   ],
                 ),
@@ -235,13 +267,15 @@ class _ActionChip extends StatelessWidget {
   final String label;
   final IconData icon;
   final Color color;
-  final VoidCallback onTap;
+  final VoidCallback? onTap;
+  final bool isBusy;
 
   const _ActionChip({
     required this.label,
     required this.icon,
     required this.color,
     required this.onTap,
+    this.isBusy = false,
   });
 
   @override
@@ -252,16 +286,18 @@ class _ActionChip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(
             horizontal: AppSpacing.sm, vertical: AppSpacing.xs),
         decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.1),
+          color: color.withValues(alpha: isBusy ? 0.05 : 0.1),
           borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
         ),
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, size: 12, color: color),
+            isBusy
+                ? SizedBox(width: 12, height: 12, child: CircularProgressIndicator(strokeWidth: 1.5, color: color))
+                : Icon(icon, size: 12, color: color),
             const SizedBox(width: 4),
             Text(label,
-                style: AppTypography.labelSmall.copyWith(color: color)),
+                style: AppTypography.labelSmall.copyWith(color: isBusy ? color.withValues(alpha: 0.5) : color)),
           ],
         ),
       ),
@@ -431,9 +467,7 @@ class _AddressSheetState extends State<_AddressSheet> {
                 controller: _addressController,
                 prefixIcon: Icons.location_on_outlined,
                 maxLines: 2,
-                validator: (v) => v == null || v.isEmpty
-                    ? 'Address is required'
-                    : null,
+                validator: Validators.address,
               ),
               const SizedBox(height: AppSpacing.md),
               AppTextField(

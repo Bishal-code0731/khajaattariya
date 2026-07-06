@@ -1,12 +1,16 @@
 import 'dart:io';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:image_picker/image_picker.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
+import '../../../core/utils/validators.dart';
 import '../../../features/auth/application/auth_provider.dart';
 import '../../../features/auth/domain/models/user_model.dart';
 import '../../../main.dart';
@@ -15,14 +19,13 @@ import '../../../shared/widgets/app_text_field.dart';
 import '../../../shared/widgets/glass_card.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-// Profile update notifier
-final profileUpdateProvider =
-StateNotifierProvider<ProfileUpdateNotifier, AsyncValue<void>>(
-      (ref) => ProfileUpdateNotifier(),
-);
+part 'profile_screen.g.dart';
 
-class ProfileUpdateNotifier extends StateNotifier<AsyncValue<void>> {
-  ProfileUpdateNotifier() : super(const AsyncValue.data(null));
+// Profile update notifier
+@Riverpod(keepAlive: true)
+class ProfileUpdate extends _$ProfileUpdate {
+  @override
+  AsyncValue<void> build() => const AsyncValue.data(null);
 
   Future<bool> updateProfile({
     required String userId,
@@ -31,11 +34,14 @@ class ProfileUpdateNotifier extends StateNotifier<AsyncValue<void>> {
   }) async {
     state = const AsyncValue.loading();
     try {
-      await supabase.from('profiles').update({
+      final updated = await supabase.from('profiles').update({
         'full_name': fullName,
         'phone': phone,
         'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', userId);
+      }).eq('id', userId).select('id');
+      if (updated.isEmpty) {
+        throw Exception('Could not update profile. Please try again.');
+      }
       state = const AsyncValue.data(null);
       return true;
     } catch (e) {
@@ -61,9 +67,12 @@ class ProfileUpdateNotifier extends StateNotifier<AsyncValue<void>> {
 
       final url = supabase.storage.from('avatars').getPublicUrl(path);
 
-      await supabase
+      final updated = await supabase
           .from('profiles')
-          .update({'avatar_url': url}).eq('id', userId);
+          .update({'avatar_url': url}).eq('id', userId).select('id');
+      if (updated.isEmpty) {
+        throw Exception('Could not update avatar. Please try again.');
+      }
 
       state = const AsyncValue.data(null);
       return url;
@@ -188,7 +197,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
         title: const Text('My Profile'),
         leading: IconButton(
           icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go(RouteNames.home),
+          onPressed: () => context.safeBack(),
         ),
         actions: [
           if (!_isEditing)
@@ -256,9 +265,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           controller: _nameController,
                           prefixIcon: Icons.person_outline_rounded,
                           enabled: _isEditing,
-                          validator: (v) => v == null || v.isEmpty
-                              ? 'Name is required'
-                              : null,
+                          validator: (v) => Validators.name(v, field: 'Name'),
                         ),
                         const SizedBox(height: AppSpacing.md),
                         AppTextField(
@@ -267,6 +274,7 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen> {
                           prefixIcon: Icons.phone_outlined,
                           keyboardType: TextInputType.phone,
                           enabled: _isEditing,
+                          validator: (v) => Validators.phone(v, optional: true),
                         ),
                         const SizedBox(height: AppSpacing.md),
                         // Email — read only always
@@ -365,9 +373,9 @@ class _AvatarSection extends StatelessWidget {
       children: [
         CircleAvatar(
           radius: 52,
-          backgroundColor: AppColors.primary.withOpacity(0.15),
+          backgroundColor: AppColors.primary.withValues(alpha: 0.15),
           backgroundImage: user.avatarUrl != null
-              ? NetworkImage(user.avatarUrl!)
+              ? CachedNetworkImageProvider(user.avatarUrl!)
               : null,
           child: user.avatarUrl == null
               ? Text(

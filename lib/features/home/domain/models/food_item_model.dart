@@ -5,6 +5,7 @@ class FoodItemModel {
   final double price;
   final String restaurantName;
   final String restaurantId;
+  final String? categoryId;
   final double rating;
   final int deliveryTimeMin;
   final bool isVeg;
@@ -17,6 +18,7 @@ class FoodItemModel {
     required this.price,
     required this.restaurantName,
     required this.restaurantId,
+    this.categoryId,
     required this.rating,
     required this.deliveryTimeMin,
     required this.isVeg,
@@ -33,9 +35,10 @@ class FoodItemModel {
       price: (map['price'] as num).toDouble(),
       restaurantName: restaurant['name'] as String? ?? '',
       restaurantId: map['restaurant_id'] as String,
+      categoryId: map['category_id'] as String?,
       rating: (restaurant['rating'] as num?)?.toDouble() ?? 0.0,
       deliveryTimeMin: restaurant['delivery_time_min'] as int? ?? 30,
-      isVeg: map['is_veg'] as bool,
+      isVeg: map['is_veg'] as bool? ?? false,
       offer: map['offer'] as String?,
     );
   }

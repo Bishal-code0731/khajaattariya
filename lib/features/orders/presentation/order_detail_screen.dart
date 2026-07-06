@@ -1,11 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/router/route_names.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_typography.dart';
 import '../../../features/orders/application/order_provider.dart';
 import '../../../features/orders/domain/models/order_model.dart';
+import '../../../features/payments/application/refund_provider.dart';
+import '../../../features/reviews/presentation/rate_order_sheet.dart';
+import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/glass_card.dart';
 import '../../../shared/order_timeline_provider.dart';
 
@@ -41,6 +46,15 @@ class OrderDetailScreen extends ConsumerWidget {
                   ]),
                   const SizedBox(height: AppSpacing.xs),
                   Text('Placed on ${_fmt(order.createdAt)}', style: AppTypography.bodySmall),
+                  if (order.status == OrderStatus.pickedUp) ...[
+                    const SizedBox(height: AppSpacing.sm),
+                    AppButton(
+                      label: 'Track Rider on Map',
+                      isOutlined: true,
+                      leadingIcon: Icons.map_outlined,
+                      onPressed: () => context.push('${RouteNames.tracking}/${order.id}'),
+                    ),
+                  ],
                 ]),
               ),
               const SizedBox(height: AppSpacing.md),
@@ -81,10 +95,96 @@ class OrderDetailScreen extends ConsumerWidget {
                       .toList());
                 },
               ),
+              if (order.status == OrderStatus.delivered) ...[
+                const SizedBox(height: AppSpacing.lg),
+                Consumer(builder: (context, ref, _) {
+                  final ratedAsync = ref.watch(orderRatingProvider(order.id));
+                  return ratedAsync.when(
+                    loading: () => const SizedBox.shrink(),
+                    error: (_, __) => const SizedBox.shrink(),
+                    data: (alreadyRated) {
+                      if (alreadyRated) {
+                        return Row(children: [
+                          const Icon(Icons.star_rounded, color: AppColors.accent, size: 18),
+                          const SizedBox(width: AppSpacing.xs),
+                          Text('You reviewed this order', style: AppTypography.bodyMedium),
+                        ]);
+                      }
+                      return AppButton(
+                        label: 'Rate Your Order',
+                        isOutlined: true,
+                        onPressed: () => RateOrderSheet.show(
+                          context,
+                          orderId: order.id,
+                          customerId: order.customerId,
+                          restaurantId: order.restaurantId,
+                          restaurantName: order.restaurantName,
+                        ),
+                      );
+                    },
+                  );
+                }),
+              ],
+              if (order.status == OrderStatus.delivered || order.status == OrderStatus.cancelled) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton.icon(
+                    onPressed: () => _showRefundDialog(context, order),
+                    icon: const Icon(Icons.currency_exchange_rounded, size: 16),
+                    label: const Text('Request Refund'),
+                  ),
+                ),
+              ],
               const SizedBox(height: AppSpacing.xl),
             ],
           );
         },
+      ),
+    );
+  }
+
+  void _showRefundDialog(BuildContext context, OrderModel order) {
+    final reasonController = TextEditingController();
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Request Refund'),
+        content: Column(mainAxisSize: MainAxisSize.min, children: [
+          Text('Rs. ${order.totalAmount.toInt()} will be requested for review.',
+              style: AppTypography.bodySmall),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: reasonController,
+            maxLines: 3,
+            decoration: const InputDecoration(labelText: 'Reason', hintText: 'What went wrong?'),
+          ),
+        ]),
+        actions: [
+          TextButton(onPressed: () => Navigator.pop(ctx), child: const Text('Cancel')),
+          Consumer(builder: (context, ref, _) {
+            return ElevatedButton(
+              onPressed: () async {
+                Navigator.pop(ctx);
+                final ok = await ref.read(refundNotifierProvider.notifier).requestRefund(
+                      orderId: order.id,
+                      amount: order.totalAmount,
+                      reason: reasonController.text.trim().isEmpty
+                          ? null
+                          : reasonController.text.trim(),
+                    );
+                if (context.mounted) {
+                  if (ok) {
+                    AppSnackbar.success(context, 'Refund requested. We\'ll review it shortly.');
+                  } else {
+                    AppSnackbar.error(context, 'Could not request refund. Please try again.');
+                  }
+                }
+              },
+              child: const Text('Submit Request'),
+            );
+          }),
+        ],
       ),
     );
   }
@@ -113,9 +213,9 @@ class _StatusChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 4),
-      decoration: BoxDecoration(color: _color.withOpacity(0.12),
+      decoration: BoxDecoration(color: _color.withValues(alpha: 0.12),
           borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-          border: Border.all(color: _color.withOpacity(0.3))),
+          border: Border.all(color: _color.withValues(alpha: 0.3))),
       child: Text(status.label, style: AppTypography.labelSmall.copyWith(color: _color)),
     );
   }

@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../../core/theme/app_spacing.dart';
@@ -7,7 +8,7 @@ import '../../domain/models/restaurant_model.dart';
 
 class NearbyRestaurantsSection extends StatelessWidget {
   final List<RestaurantModel> restaurants;
-  final Function(RestaurantModel) onRestaurantTap;
+  final ValueChanged<RestaurantModel> onRestaurantTap;
 
   const NearbyRestaurantsSection({
     super.key,
@@ -17,40 +18,26 @@ class NearbyRestaurantsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final screenWidth = MediaQuery.of(context).size.width;
-    final cardWidth = screenWidth * 0.42;
-    final imageHeight = cardWidth * 0.65;
-    final cardHeight = imageHeight + 90;
-
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.screenHorizontal,
-          ),
-          child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const Text('Nearby Restaurants', style: AppTypography.headingSmall),
-              TextButton(onPressed: () {}, child: const Text('See all')),
-            ],
-          ),
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal),
+          child: Text('Nearby Restaurants', style: AppTypography.headingSmall),
         ),
+        const SizedBox(height: AppSpacing.sm),
         SizedBox(
-          height: cardHeight,
-          child: ListView.builder(
+          height: 230,
+          child: ListView.separated(
+            padding: const EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal),
             scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(
-              horizontal: AppSpacing.screenHorizontal,
-            ),
             itemCount: restaurants.length,
+            separatorBuilder: (_, __) => const SizedBox(width: AppSpacing.sm),
             itemBuilder: (context, index) {
+              final r = restaurants[index];
               return _RestaurantCard(
-                restaurant: restaurants[index],
-                cardWidth: cardWidth,
-                imageHeight: imageHeight,
-                onTap: () => onRestaurantTap(restaurants[index]),
+                restaurant: r,
+                onTap: () => onRestaurantTap(r),
               );
             },
           ),
@@ -63,157 +50,110 @@ class NearbyRestaurantsSection extends StatelessWidget {
 class _RestaurantCard extends StatelessWidget {
   final RestaurantModel restaurant;
   final VoidCallback onTap;
-  final double cardWidth;
-  final double imageHeight;
 
-  const _RestaurantCard({
-    required this.restaurant,
-    required this.onTap,
-    required this.cardWidth,
-    required this.imageHeight,
-  });
+  const _RestaurantCard({required this.restaurant, required this.onTap});
 
   @override
   Widget build(BuildContext context) {
-    return GlassCard(
-      width: cardWidth,
-      margin: const EdgeInsets.only(right: AppSpacing.sm),
-      borderRadius: AppSpacing.radiusLg,
-      padding: EdgeInsets.zero,
-      onTap: onTap,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Stack(
-            children: [
-              ClipRRect(
-                borderRadius: const BorderRadius.only(
-                  topLeft: Radius.circular(AppSpacing.radiusLg),
-                  topRight: Radius.circular(AppSpacing.radiusLg),
-                ),
-                child: Image.network(
-                  restaurant.imageUrl,
-                  height: imageHeight,
-                  width: double.infinity,
-                  fit: BoxFit.cover,
-                  loadingBuilder: (context, child, progress) {
-                    if (progress == null) return child;
-                    return Container(
-                      height: imageHeight,
-                      color: AppColors.border,
-                      child: const Center(
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppColors.primary,
-                        ),
-                      ),
-                    );
-                  },
-                  errorBuilder: (context, error, stackTrace) {
-                    return Container(
-                      height: imageHeight,
-                      color: AppColors.border,
-                      child: const Center(
-                        child: Icon(Icons.restaurant_rounded,
+    return SizedBox(
+      width: 210,
+      child: GlassCard(
+        onTap: onTap,
+        borderRadius: AppSpacing.radiusLg,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Image
+            ClipRRect(
+              borderRadius: const BorderRadius.vertical(
+                  top: Radius.circular(AppSpacing.radiusLg)),
+              child: AspectRatio(
+                aspectRatio: 16 / 10,
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    CachedNetworkImage(
+                      imageUrl: restaurant.imageUrl,
+                      fit: BoxFit.cover,
+                      memCacheWidth: 420,
+                      fadeInDuration: const Duration(milliseconds: 150),
+                      placeholder: (_, __) => Container(color: AppColors.border),
+                      errorWidget: (_, __, ___) => Container(
+                        color: AppColors.border,
+                        child: const Icon(Icons.restaurant_rounded,
                             color: AppColors.textHint, size: 32),
                       ),
-                    );
-                  },
-                ),
-              ),
-              if (restaurant.offer != null)
-                Positioned(
-                  top: AppSpacing.sm,
-                  left: AppSpacing.sm,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: AppSpacing.sm,
-                      vertical: AppSpacing.xs,
                     ),
-                    decoration: BoxDecoration(
-                      color: AppColors.primary,
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                    ),
-                    child: Text(
-                      restaurant.offer!,
-                      style: AppTypography.labelSmall
-                          .copyWith(color: AppColors.white),
-                    ),
-                  ),
-                ),
-              if (!restaurant.isOpen)
-                Positioned.fill(
-                  child: ClipRRect(
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(AppSpacing.radiusLg),
-                      topRight: Radius.circular(AppSpacing.radiusLg),
-                    ),
-                    child: Container(
-                      color: AppColors.overlay60,
-                      child: const Center(
-                        child: Text(
-                          'CLOSED',
-                          style: TextStyle(
-                            color: AppColors.white,
-                            fontWeight: FontWeight.w800,
-                            fontSize: 14,
-                            letterSpacing: 2,
+                    if (!restaurant.isOpen)
+                      Container(
+                        color: Colors.black54,
+                        child: const Center(
+                          child: Text(
+                            'CLOSED',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 2,
+                            ),
                           ),
                         ),
                       ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-          Padding(
-            padding: const EdgeInsets.all(AppSpacing.sm),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Text(
-                  restaurant.name,
-                  style: AppTypography.headingSmall.copyWith(fontSize: 13),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  restaurant.cuisineType,
-                  style: AppTypography.bodySmall,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Row(
-                  children: [
-                    const Icon(Icons.star_rounded,
-                        color: AppColors.accent, size: 13),
-                    const SizedBox(width: 2),
-                    Text(
-                      '${restaurant.rating}',
-                      style: AppTypography.labelSmall
-                          .copyWith(color: AppColors.textPrimary),
-                    ),
-                    const SizedBox(width: AppSpacing.xs),
-                    const Icon(Icons.circle, size: 3, color: AppColors.textHint),
-                    const SizedBox(width: AppSpacing.xs),
-                    Flexible(
-                      child: Text(
-                        '${restaurant.deliveryTimeMin} min',
-                        style: AppTypography.bodySmall,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
+                    if (restaurant.isFeatured)
+                      Positioned(
+                        top: AppSpacing.xs,
+                        left: AppSpacing.xs,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: AppSpacing.xs, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: AppColors.accent,
+                            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                          ),
+                          child: const Text('FEATURED',
+                              style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 9,
+                                  fontWeight: FontWeight.w700)),
+                        ),
                       ),
-                    ),
                   ],
                 ),
-              ],
+              ),
             ),
-          ),
-        ],
+            Padding(
+              padding: const EdgeInsets.all(AppSpacing.sm),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(restaurant.name,
+                      style: AppTypography.headingSmall.copyWith(fontSize: 14),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: 2),
+                  Text(restaurant.cuisineType,
+                      style: AppTypography.bodySmall,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis),
+                  const SizedBox(height: AppSpacing.xs),
+                  Row(
+                    children: [
+                      const Icon(Icons.star_rounded, size: 13, color: AppColors.accent),
+                      const SizedBox(width: 2),
+                      Text('${restaurant.rating}', style: AppTypography.labelSmall),
+                      const Spacer(),
+                      const Icon(Icons.access_time_rounded,
+                          size: 12, color: AppColors.textHint),
+                      const SizedBox(width: 2),
+                      Text('${restaurant.deliveryTimeMin}m',
+                          style: AppTypography.bodySmall.copyWith(fontSize: 10)),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
