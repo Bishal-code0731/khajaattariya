@@ -9,9 +9,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+  intl: any                      # Dates, numbers, plurals for EN + NE (D-12)
 
   # ── State Management ──────────────────────────────────────
   flutter_riverpod: ^2.5.1
+  riverpod: ^2.5.1               # imported directly by a few providers
   riverpod_annotation: ^2.3.5
 
   # ── Navigation ────────────────────────────────────────────
@@ -28,11 +32,9 @@ dependencies:
   flutter_dotenv: ^5.1.0
 
   # ── HTTP ─────────────────────────────────────────────────
-  http: ^1.2.2
 
   # ── Payments ─────────────────────────────────────────────
   url_launcher: ^6.3.0          # Opens Khalti payment URL
-  flutter_stripe: ^11.3.0       # Real Stripe PaymentSheet (sandbox/test mode)
   app_links: ^6.3.2             # Deep-link callback for Khalti checkout return
 
   # ── Image handling ───────────────────────────────────────
@@ -41,13 +43,11 @@ dependencies:
 
   # ── Local storage ─────────────────────────────────────────
   shared_preferences: ^2.3.2    # Theme persistence + offline cache/retry queue
-  path_provider: ^2.1.5         # Temp file for image compression before upload
 
   # ── Connectivity ──────────────────────────────────────────
   connectivity_plus: ^6.0.5     # Online/offline detection for offline-first UX
 
   # ── UI ───────────────────────────────────────────────────
-  flutter_svg: ^2.0.10          # SVG assets
   cached_network_image: ^3.3.1  # Cached remote images
   shimmer: ^3.0.0               # Loading skeleton effect
   fl_chart: ^0.69.0             # Restaurant analytics charts
@@ -73,3 +73,17 @@ flutter:
     - .env                       # Supabase URL + anon key
     - assets/images/             # Static local images
     - assets/icons/              # App icons
+
+  fonts:
+    - family: Mukta              # Latin + Devanagari (D-13), SIL OFL — assets/fonts/OFL.txt
+      fonts:
+        - asset: assets/fonts/Mukta-Regular.ttf
+          weight: 400
+        - asset: assets/fonts/Mukta-Medium.ttf
+          weight: 500
+        - asset: assets/fonts/Mukta-SemiBold.ttf
+          weight: 600
+        - asset: assets/fonts/Mukta-Bold.ttf
+          weight: 700
+        - asset: assets/fonts/Mukta-ExtraBold.ttf
+          weight: 800
