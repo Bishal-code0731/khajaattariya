@@ -3,10 +3,6 @@ import '../theme/app_colors.dart';
 import '../router/route_names.dart';
 
 /// Single source of truth for the four account types in the app.
-/// Every place that used to compare against raw strings like
-/// `'admin'`/`'rider'`/`'restaurant'`/`'customer'` should use this
-/// enum instead, so the mapping to routes/colors/labels only lives
-/// in one place.
 enum UserRole {
   customer,
   restaurant,

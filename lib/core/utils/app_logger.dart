@@ -1,8 +1,6 @@
 import 'package:flutter/foundation.dart';
 
-/// Minimal structured logger. In debug builds it prints to console with a
-/// tag + timestamp; in release builds it stays silent (swap the `_emit`
-/// body for a crash-reporting SDK call when one is added).
+/// Minimal structured logger.
 class AppLogger {
   AppLogger._();
 
@@ -10,7 +8,8 @@ class AppLogger {
 
   static void info(String tag, String message) => _emit(tag, message);
 
-  static void warning(String tag, String message) => _emit(tag, message, isWarning: true);
+  static void warning(String tag, String message) =>
+      _emit(tag, message, isWarning: true);
 
   static void error(String tag, Object error, [StackTrace? stackTrace]) {
     _emit(tag, error.toString(), isWarning: true);

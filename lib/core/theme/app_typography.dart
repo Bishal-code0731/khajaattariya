@@ -1,95 +1,115 @@
 import 'package:flutter/material.dart';
-import 'app_colors.dart';
 
+/// Type scale (Mukta — Latin + Devanagari).
 class AppTypography {
-  // ── Display ───────────────────────────────────────────
+  AppTypography._();
+
+  static const String fontFamily = 'Mukta';
+
+  // Display / headings
   static const TextStyle displayLarge = TextStyle(
-    fontSize: 36, fontWeight: FontWeight.w800,
-    color: AppColors.textPrimary, letterSpacing: -1.0, height: 1.1,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 34,
+      fontWeight: FontWeight.w800,
+      height: 1.15,
+      letterSpacing: -0.6);
   static const TextStyle displayMedium = TextStyle(
-    fontSize: 28, fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary, letterSpacing: -0.5, height: 1.2,
-  );
-
-  // ── Headings ──────────────────────────────────────────
+      fontFamily: fontFamily,
+      fontSize: 28,
+      fontWeight: FontWeight.w800,
+      height: 1.2,
+      letterSpacing: -0.4);
   static const TextStyle headingLarge = TextStyle(
-    fontSize: 22, fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary, letterSpacing: -0.3, height: 1.3,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 22,
+      fontWeight: FontWeight.w700,
+      height: 1.3,
+      letterSpacing: -0.2);
   static const TextStyle headingMedium = TextStyle(
-    fontSize: 18, fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary, height: 1.3,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 18,
+      fontWeight: FontWeight.w700,
+      height: 1.3);
   static const TextStyle headingSmall = TextStyle(
-    fontSize: 16, fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary, height: 1.4,
-  );
+      fontFamily: fontFamily,
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+      height: 1.35);
 
-  // ── Body ──────────────────────────────────────────────
+  // Body
   static const TextStyle bodyLarge = TextStyle(
-    fontSize: 16, fontWeight: FontWeight.w400,
-    color: AppColors.textPrimary, height: 1.6,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 16,
+      fontWeight: FontWeight.w400,
+      height: 1.5);
   static const TextStyle bodyMedium = TextStyle(
-    fontSize: 14, fontWeight: FontWeight.w400,
-    color: AppColors.textSecondary, height: 1.5,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 14,
+      fontWeight: FontWeight.w400,
+      height: 1.5);
   static const TextStyle bodySmall = TextStyle(
-    fontSize: 12, fontWeight: FontWeight.w400,
-    color: AppColors.textHint, height: 1.5,
-  );
+      fontFamily: fontFamily,
+      fontSize: 12.5,
+      fontWeight: FontWeight.w400,
+      height: 1.45);
 
-  // Dark-mode counterparts for the two body styles that are used
-  // inline across list/card content without a per-call-site color
-  // override. Screens that already branch on `Theme.of(context).
-  // brightness` (see app_text_field.dart) should prefer these over
-  // manually copying AppColors.white/darkTextSecondary in per dark
-  // mode, keeping that branching logic in one place.
-  static const TextStyle bodyMediumDark = TextStyle(
-    fontSize: 14, fontWeight: FontWeight.w400,
-    color: AppColors.darkTextSecondary, height: 1.5,
-  );
-
-  static const TextStyle bodySmallDark = TextStyle(
-    fontSize: 12, fontWeight: FontWeight.w400,
-    color: AppColors.darkTextHint, height: 1.5,
-  );
-
-  // ── Labels ────────────────────────────────────────────
+  // Labels (buttons, tabs, chips, form labels)
   static const TextStyle labelLarge = TextStyle(
-    fontSize: 16, fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary, letterSpacing: 0.2,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 16,
+      fontWeight: FontWeight.w600,
+      height: 1.3);
   static const TextStyle labelMedium = TextStyle(
-    fontSize: 14, fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary, letterSpacing: 0.1,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 14,
+      fontWeight: FontWeight.w600,
+      height: 1.3);
   static const TextStyle labelSmall = TextStyle(
-    fontSize: 12, fontWeight: FontWeight.w500,
-    color: AppColors.textPrimary, letterSpacing: 0.2,
-  );
+      fontFamily: fontFamily,
+      fontSize: 12,
+      fontWeight: FontWeight.w600,
+      height: 1.3,
+      letterSpacing: 0.2);
 
-  // ── Price ─────────────────────────────────────────────
+  // Money
   static const TextStyle priceLarge = TextStyle(
-    fontSize: 22, fontWeight: FontWeight.w800,
-    color: AppColors.textPrimary, letterSpacing: -0.3,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 22,
+      fontWeight: FontWeight.w800,
+      height: 1.2,
+      fontFeatures: [FontFeature.tabularFigures()]);
   static const TextStyle priceMedium = TextStyle(
-    fontSize: 16, fontWeight: FontWeight.w700,
-    color: AppColors.textPrimary, letterSpacing: -0.2,
-  );
-
+      fontFamily: fontFamily,
+      fontSize: 16,
+      fontWeight: FontWeight.w700,
+      height: 1.25,
+      fontFeatures: [FontFeature.tabularFigures()]);
   static const TextStyle priceSmall = TextStyle(
-    fontSize: 13, fontWeight: FontWeight.w600,
-    color: AppColors.textPrimary,
-  );
+      fontFamily: fontFamily,
+      fontSize: 13.5,
+      fontWeight: FontWeight.w600,
+      height: 1.25,
+      fontFeatures: [FontFeature.tabularFigures()]);
+
+  static const TextStyle bodyMediumDark = bodyMedium;
+  static const TextStyle bodySmallDark = bodySmall;
+
+  /// Material TextTheme built from this scale (used by AppTheme).
+  static TextTheme textTheme(Color primary, Color secondary) => TextTheme(
+        displayLarge: displayLarge.copyWith(color: primary),
+        displayMedium: displayMedium.copyWith(color: primary),
+        displaySmall: headingLarge.copyWith(color: primary),
+        headlineLarge: displayMedium.copyWith(color: primary),
+        headlineMedium: headingLarge.copyWith(color: primary),
+        headlineSmall: headingMedium.copyWith(color: primary),
+        titleLarge: headingMedium.copyWith(color: primary),
+        titleMedium: headingSmall.copyWith(color: primary),
+        titleSmall: labelMedium.copyWith(color: primary),
+        bodyLarge: bodyLarge.copyWith(color: primary),
+        bodyMedium: bodyMedium.copyWith(color: primary),
+        bodySmall: bodySmall.copyWith(color: secondary),
+        labelLarge: labelLarge.copyWith(color: primary),
+        labelMedium: labelMedium.copyWith(color: primary),
+        labelSmall: labelSmall.copyWith(color: secondary),
+      );
 }

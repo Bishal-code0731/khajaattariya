@@ -7,7 +7,10 @@ import '../../features/auth/presentation/splash_screen.dart';
 import '../../features/auth/presentation/login_screen.dart';
 import '../../features/auth/presentation/signup_screen.dart';
 import '../../features/auth/presentation/forgot_password_screen.dart';
+import '../../features/auth/presentation/reset_password_screen.dart';
+import '../../features/auth/presentation/verify_email_screen.dart';
 import '../../features/home/presentation/home_screen.dart';
+import '../../features/home/presentation/offers_screen.dart';
 import '../../features/restaurant/presentation/restaurant_detail_screen.dart';
 import '../../features/cart/presentation/cart_screen.dart';
 import '../../features/orders/presentation/orders_screen.dart';
@@ -50,9 +53,7 @@ const _protectedRoutes = [
   RouteNames.tracking,
 ];
 
-/// Routes that belong exclusively to one role. Any other logged-in
-/// role trying to open one of these gets bounced to their own home
-/// route instead of rendering someone else's dashboard.
+/// Routes that belong exclusively to one role.
 const _roleExclusiveRoutes = {
   RouteNames.restaurantDashboard: UserRole.restaurant,
   RouteNames.menuManagement: UserRole.restaurant,
@@ -61,16 +62,24 @@ const _roleExclusiveRoutes = {
   RouteNames.adminDashboard: UserRole.admin,
 };
 
+/// Pages that only make sense for customers (ordering, paying, tracking).
+const _customerOnlyRoutes = [
+  RouteNames.offers,
+  RouteNames.cart,
+  RouteNames.payment,
+  RouteNames.orders,
+  RouteNames.tracking,
+  RouteNames.addressBook,
+  RouteNames.favorites,
+];
+
 class _RouterNotifier extends ChangeNotifier {
   UserModel? _user;
   bool _initialized = false;
   bool get initialized => _initialized;
   UserModel? get user => _user;
 
-  // Captures a deep link (e.g. a notification tap) opened while auth is
-  // still resolving, so it isn't silently swallowed by the "not
-  // initialized yet → splash" redirect below and can be honored once
-  // auth resolves instead of always landing on the role's home route.
+  // Captures a deep link (e.g.
   String? pendingDeepLink;
 
   void update(UserModel? user, bool initialized) {
@@ -83,11 +92,20 @@ class _RouterNotifier extends ChangeNotifier {
 final appRouterProvider = Provider<GoRouter>((ref) {
   final notifier = _RouterNotifier();
 
+  final splashShownAt = DateTime.now();
+  const minSplash = Duration(milliseconds: 1200);
+  void apply(UserModel? user) {
+    if (notifier.initialized) return notifier.update(user, true);
+    final wait = minSplash - DateTime.now().difference(splashShownAt);
+    if (wait <= Duration.zero) return notifier.update(user, true);
+    Future.delayed(wait, () => notifier.update(user, true));
+  }
+
   ref.listen<AsyncValue<UserModel?>>(authStateProvider, (_, next) {
     next.when(
-      data: (user) => notifier.update(user, true),
+      data: apply,
       loading: () {},
-      error: (_, __) => notifier.update(null, true),
+      error: (_, __) => apply(null),
     );
   });
 
@@ -99,7 +117,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       if (!notifier.initialized) {
         if (state.matchedLocation != RouteNames.splash) {
           notifier.pendingDeepLink = state.uri.toString();
-          AppLogger.nav('redirect: auth not initialized yet → ${RouteNames.splash} (captured deep link ${notifier.pendingDeepLink})');
+          AppLogger.nav(
+              'redirect: auth not initialized yet → ${RouteNames.splash} (captured deep link ${notifier.pendingDeepLink})');
           return RouteNames.splash;
         }
         return null;
@@ -117,7 +136,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         final deepLink = notifier.pendingDeepLink;
         if (deepLink != null) {
           notifier.pendingDeepLink = null;
-          AppLogger.nav('redirect: splash → $deepLink (restoring captured deep link)');
+          AppLogger.nav(
+              'redirect: splash → $deepLink (restoring captured deep link)');
           return deepLink;
         }
         final target = isLoggedIn ? user.userRole.homeRoute : RouteNames.home;
@@ -125,15 +145,24 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         return target;
       }
       if (isLoggedIn && isAuthRoute) {
-        AppLogger.nav('redirect: already logged in, leaving $location → ${user.userRole.homeRoute}');
+        AppLogger.nav(
+            'redirect: already logged in, leaving $location → ${user.userRole.homeRoute}');
         return user.userRole.homeRoute;
       }
       if (!isLoggedIn && isProtected) {
-        AppLogger.nav('redirect: $location requires login → ${RouteNames.login}');
+        AppLogger.nav(
+            'redirect: $location requires login → ${RouteNames.login}');
         return RouteNames.login;
       }
 
       if (isLoggedIn) {
+        if (user.userRole != UserRole.customer &&
+            (location == RouteNames.home ||
+                _customerOnlyRoutes.any((r) => location.startsWith(r)))) {
+          AppLogger.nav(
+              'redirect: ${user.userRole.name} not allowed on customer page $location → ${user.userRole.homeRoute}');
+          return user.userRole.homeRoute;
+        }
         for (final entry in _roleExclusiveRoutes.entries) {
           if (location.startsWith(entry.key) && user.userRole != entry.value) {
             AppLogger.nav(
@@ -151,37 +180,66 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: RouteNames.home,
+        pageBuilder: (_, __) => const NoTransitionPage(
+            child: AppBackGuard(isAppRoot: true, child: HomeScreen())),
+      ),
+      GoRoute(
+        path: RouteNames.offers,
         pageBuilder: (_, __) =>
-            const NoTransitionPage(child: AppBackGuard(isAppRoot: true, child: HomeScreen())),
+            const NoTransitionPage(child: AppBackGuard(child: OffersScreen())),
       ),
       GoRoute(
         path: '${RouteNames.restaurant}/:id',
         pageBuilder: (_, state) => MaterialPage(
           child: AppBackGuard(
-            child: RestaurantDetailScreen(restaurantId: state.pathParameters['id']!),
+            child: RestaurantDetailScreen(
+                restaurantId: state.pathParameters['id']!),
           ),
         ),
       ),
       GoRoute(
         path: RouteNames.login,
-        pageBuilder: (_, __) => const NoTransitionPage(child: AppBackGuard(child: LoginScreen())),
+        pageBuilder: (_, __) =>
+            const NoTransitionPage(child: AppBackGuard(child: LoginScreen())),
       ),
       GoRoute(
         path: RouteNames.signup,
-        pageBuilder: (_, __) => const NoTransitionPage(child: AppBackGuard(child: SignupScreen())),
+        pageBuilder: (_, __) =>
+            const NoTransitionPage(child: AppBackGuard(child: SignupScreen())),
       ),
       GoRoute(
         path: RouteNames.forgotPassword,
-        pageBuilder: (_, __) =>
-            const NoTransitionPage(child: AppBackGuard(child: ForgotPasswordScreen())),
+        pageBuilder: (_, __) => const NoTransitionPage(
+            child: AppBackGuard(child: ForgotPasswordScreen())),
+      ),
+      GoRoute(
+        path: RouteNames.verifyEmail,
+        // The email travels in `extra` (never in the URL — privacy).
+        pageBuilder: (_, state) {
+          final email = (state.extra as Map?)?['email'] as String?;
+          return NoTransitionPage(
+            child: AppBackGuard(
+              child: email == null
+                  ? const LoginScreen()
+                  : VerifyEmailScreen(email: email),
+            ),
+          );
+        },
+      ),
+      GoRoute(
+        path: RouteNames.resetPassword,
+        pageBuilder: (_, __) => const NoTransitionPage(
+            child: AppBackGuard(child: ResetPasswordScreen())),
       ),
       GoRoute(
         path: RouteNames.cart,
-        pageBuilder: (_, __) => const MaterialPage(child: AppBackGuard(child: CartScreen())),
+        pageBuilder: (_, __) =>
+            const MaterialPage(child: AppBackGuard(child: CartScreen())),
       ),
       GoRoute(
         path: RouteNames.orders,
-        pageBuilder: (_, __) => const MaterialPage(child: AppBackGuard(child: OrdersScreen())),
+        pageBuilder: (_, __) =>
+            const MaterialPage(child: AppBackGuard(child: OrdersScreen())),
       ),
       GoRoute(
         path: '${RouteNames.orderDetail}/:id',
@@ -195,17 +253,17 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         path: RouteNames.payment,
         pageBuilder: (_, state) {
           final extra = state.extra;
-          // orderAmounts: Map<String orderId, num amount> — one entry per
-          // restaurant order in a (possibly multi-restaurant) checkout.
           final rawAmounts = extra is Map ? extra['orderAmounts'] : null;
           if (rawAmounts is! Map || rawAmounts.isEmpty) {
-            AppLogger.warning('router', 'payment route opened without valid extra data');
+            AppLogger.warning(
+                'router', 'payment route opened without valid extra data');
             return MaterialPage(
               child: AppBackGuard(
                 child: Scaffold(
                   appBar: AppBar(title: const Text('Payment')),
                   body: const Center(
-                    child: Text('Missing order details. Please go back and try again.'),
+                    child: Text(
+                        'Missing order details. Please go back and try again.'),
                   ),
                 ),
               ),
@@ -224,7 +282,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: RouteNames.restaurantDashboard,
         pageBuilder: (_, __) => const NoTransitionPage(
-          child: AppBackGuard(isAppRoot: true, child: RestaurantDashboardScreen()),
+          child:
+              AppBackGuard(isAppRoot: true, child: RestaurantDashboardScreen()),
         ),
       ),
       GoRoute(
@@ -246,11 +305,13 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: RouteNames.profile,
-        pageBuilder: (_, __) => const MaterialPage(child: AppBackGuard(child: ProfileScreen())),
+        pageBuilder: (_, __) =>
+            const MaterialPage(child: AppBackGuard(child: ProfileScreen())),
       ),
       GoRoute(
         path: RouteNames.search,
-        pageBuilder: (_, __) => const MaterialPage(child: AppBackGuard(child: SearchScreen())),
+        pageBuilder: (_, __) =>
+            const MaterialPage(child: AppBackGuard(child: SearchScreen())),
       ),
       GoRoute(
         path: RouteNames.adminDashboard,
@@ -260,8 +321,8 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: RouteNames.notifications,
-        pageBuilder: (_, __) =>
-            const MaterialPage(child: AppBackGuard(child: NotificationsScreen())),
+        pageBuilder: (_, __) => const MaterialPage(
+            child: AppBackGuard(child: NotificationsScreen())),
       ),
       GoRoute(
         path: RouteNames.addressBook,
@@ -270,19 +331,22 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
       GoRoute(
         path: RouteNames.favorites,
-        pageBuilder: (_, __) => const MaterialPage(child: AppBackGuard(child: FavoritesScreen())),
+        pageBuilder: (_, __) =>
+            const MaterialPage(child: AppBackGuard(child: FavoritesScreen())),
       ),
       GoRoute(
         path: '${RouteNames.restaurantHours}/:id',
         pageBuilder: (_, state) => MaterialPage(
           child: AppBackGuard(
-            child: RestaurantHoursScreen(restaurantId: state.pathParameters['id']!),
+            child: RestaurantHoursScreen(
+                restaurantId: state.pathParameters['id']!),
           ),
         ),
       ),
       GoRoute(
         path: RouteNames.support,
-        pageBuilder: (_, __) => const MaterialPage(child: AppBackGuard(child: SupportScreen())),
+        pageBuilder: (_, __) =>
+            const MaterialPage(child: AppBackGuard(child: SupportScreen())),
       ),
       GoRoute(
         path: '${RouteNames.support}/:id',
@@ -302,11 +366,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       ),
     ],
     errorBuilder: (_, state) {
-      AppLogger.warning('router', 'no route matched "${state.uri}": ${state.error}');
+      AppLogger.warning(
+          'router', 'no route matched "${state.uri}": ${state.error}');
       return RouteErrorScreen(details: state.error?.toString());
     },
   );
 
   ref.onDispose(router.dispose);
+  // A password-reset link opens a recovery session: show the set-new-password screen.
+  final recoverySub = ref
+      .read(authRepositoryProvider)
+      .passwordRecoveryEvents
+      .listen((_) => router.go(RouteNames.resetPassword));
+  ref.onDispose(recoverySub.cancel);
+
   return router;
 });

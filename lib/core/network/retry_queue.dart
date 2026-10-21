@@ -1,8 +1,7 @@
 import '../cache/local_store.dart';
 import '../utils/app_logger.dart';
 
-/// A single failed write waiting to be replayed once connectivity
-/// returns — e.g. a favorite toggle made while offline.
+/// A single failed write waiting to be replayed once connectivity returns — e.g.
 class QueuedRequest {
   final String id;
   final String type;
@@ -43,15 +42,6 @@ class QueuedRequest {
       );
 }
 
-/// Persisted queue of writes that failed (most commonly because the
-/// device was offline) so they survive an app restart and can be
-/// replayed the next time connectivity is confirmed.
-///
-/// Handlers are registered per request `type` by whichever feature
-/// enqueues that type — see [FavoriteToggleNotifier] for the reference
-/// implementation. Extending this to another mutation (e.g. marking a
-/// notification read) just means enqueuing a `QueuedRequest` with a new
-/// `type` and registering a handler for it in [flush].
 class RetryQueue {
   RetryQueue._();
   static final RetryQueue instance = RetryQueue._();
@@ -59,12 +49,6 @@ class RetryQueue {
   static const _key = 'retry_queue';
   static const _maxAttempts = 5;
 
-  // Every read-modify-write against the queue is chained onto this so
-  // enqueue() and flush() (or two overlapping flush() calls, e.g. from a
-  // flapping connection) can't race and silently drop each other's
-  // writes — without this, "load list, mutate, save whole list" from two
-  // callers at once means whichever save() lands second wins and erases
-  // the other's change.
   Future<void> _lock = Future.value();
 
   Future<T> _synchronized<T>(Future<T> Function() action) {
@@ -80,7 +64,8 @@ class RetryQueue {
   }
 
   Future<void> _save(List<QueuedRequest> items) {
-    return LocalStore.instance.saveList(_key, items.map((e) => e.toMap()).toList());
+    return LocalStore.instance
+        .saveList(_key, items.map((e) => e.toMap()).toList());
   }
 
   Future<void> enqueue(String type, Map<String, dynamic> payload) {
@@ -101,17 +86,12 @@ class RetryQueue {
 
   Future<int> pendingCount() async => (await _load()).length;
 
-  /// Drops every queued item, e.g. on sign-out — a queued write made by
-  /// one account should never replay under a different account's
-  /// session on a shared device.
+  /// Drops every queued item, e.g.
   Future<void> clear() => _synchronized(() => _save(const []));
 
-  /// Replays every queued request whose `type` has a registered handler
-  /// in [handlers]. Requests that fail again (still offline, or a real
-  /// error) stay queued for the next flush, up to [_maxAttempts] before
-  /// being dropped as permanently broken; unknown types are dropped
-  /// immediately with a warning rather than retried forever.
-  Future<void> flush(Map<String, Future<void> Function(Map<String, dynamic>)> handlers) {
+  /// Replays every queued request whose `type` has a registered handler in [handlers].
+  Future<void> flush(
+      Map<String, Future<void> Function(Map<String, dynamic>)> handlers) {
     return _synchronized(() async {
       final items = await _load();
       if (items.isEmpty) return;
@@ -120,7 +100,8 @@ class RetryQueue {
       for (final item in items) {
         final handler = handlers[item.type];
         if (handler == null) {
-          AppLogger.warning('retryQueue', 'no handler registered for ${item.type}, dropping');
+          AppLogger.warning(
+              'retryQueue', 'no handler registered for ${item.type}, dropping');
           continue;
         }
         try {
@@ -132,14 +113,12 @@ class RetryQueue {
             AppLogger.warning('retryQueue',
                 'replay of ${item.type} failed $_maxAttempts times, dropping: $e');
           } else {
-            AppLogger.warning('retryQueue', 'replay of ${item.type} failed again: $e');
+            AppLogger.warning(
+                'retryQueue', 'replay of ${item.type} failed again: $e');
             failed.add(next);
           }
         }
       }
-      // Re-read (inside the same lock) instead of blindly overwriting
-      // with `failed` — an enqueue() that ran between our initial _load()
-      // and now must not be erased by this save.
       final current = await _load();
       final processedIds = items.map((e) => e.id).toSet();
       final untouched = current.where((e) => !processedIds.contains(e.id));

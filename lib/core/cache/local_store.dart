@@ -1,21 +1,13 @@
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 
-/// Disk-persisted cache for read models (restaurants, categories, menu
-/// items, the signed-in user's profile) and the offline retry queue.
-///
-/// Backed by shared_preferences (already a dependency for theme
-/// persistence) storing each entry as a JSON string plus a separate
-/// "last updated" timestamp — enough for this app's data sizes without
-/// pulling in a database package. Every read/write here works with the
-/// same raw `Map<String, dynamic>` shape Supabase already returns, so
-/// callers just round-trip through each model's existing `fromMap`.
 class LocalStore {
   LocalStore._();
   static final LocalStore instance = LocalStore._();
 
   SharedPreferences? _prefs;
-  Future<SharedPreferences> get _sp async => _prefs ??= await SharedPreferences.getInstance();
+  Future<SharedPreferences> get _sp async =>
+      _prefs ??= await SharedPreferences.getInstance();
 
   static String _dataKey(String key) => 'offline_cache::$key';
   static String _timeKey(String key) => 'offline_cache_ts::$key';
@@ -34,8 +26,7 @@ class LocalStore {
       final decoded = jsonDecode(raw) as List;
       return decoded.cast<Map<String, dynamic>>();
     } catch (_) {
-      // Corrupt/incompatible entry (e.g. a model shape change) — treat
-      // as no cache rather than crashing the caller.
+      // Corrupt/incompatible entry (e.g.
       return null;
     }
   }
