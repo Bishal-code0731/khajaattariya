@@ -1,89 +1,170 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 
-/// Primary button used across the app.
-/// Supports loading state, outlined variant, and custom colors.
-class AppButton extends StatelessWidget {
-  final String label;
-  final VoidCallback? onPressed;
-  final bool isLoading;
-  final bool isOutlined;
-  final Color? color;
-  final Color? textColor;
-  final IconData? leadingIcon;
+enum AppButtonVariant {
+  /// Brand-filled — the one main action in an area.
+  primary,
 
+  /// Soft brand tint — secondary actions.
+  tonal,
+
+  /// Bordered — neutral alternatives ("Cancel", "Edit").
+  outline,
+
+  /// Text only — low emphasis.
+  text,
+
+  /// Red — destructive actions ("Delete", "Reject").
+  danger,
+}
+
+enum AppButtonSize { small, medium, large }
+
+/// The button used everywhere.
+class AppButton extends StatelessWidget {
   const AppButton({
     super.key,
     required this.label,
     this.onPressed,
     this.isLoading = false,
-    this.isOutlined = false,
+    this.variant = AppButtonVariant.primary,
+    this.size = AppButtonSize.large,
+    this.leadingIcon,
+    this.trailingIcon,
+    this.expand = true,
+    // Legacy parameters (old screens).
+    bool isOutlined = false,
     this.color,
     this.textColor,
-    this.leadingIcon,
-  });
+  }) : _legacyOutlined = isOutlined;
+
+  final String label;
+  final VoidCallback? onPressed;
+  final bool isLoading;
+  final AppButtonVariant variant;
+  final AppButtonSize size;
+  final IconData? leadingIcon;
+  final IconData? trailingIcon;
+
+  /// Fill the available width (default).
+  final bool expand;
+  final Color? color;
+  final Color? textColor;
+  final bool _legacyOutlined;
+
+  AppButtonVariant get _variant =>
+      _legacyOutlined ? AppButtonVariant.outline : variant;
 
   @override
   Widget build(BuildContext context) {
-    final buttonColor = color ?? AppColors.primary;
-    final labelColor = textColor ?? (isOutlined ? buttonColor : AppColors.white);
+    final p = context.palette;
+    final enabled = onPressed != null && !isLoading;
 
-    final style = isOutlined
-        ? OutlinedButton.styleFrom(
-            foregroundColor: buttonColor,
-            side: BorderSide(color: buttonColor, width: 1.5),
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            ),
-          )
-        : ElevatedButton.styleFrom(
-            backgroundColor: buttonColor,
-            foregroundColor: labelColor,
-            elevation: 0,
-            shadowColor: Colors.transparent,
-            padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-            shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            ),
-          );
+    final (Color bg, Color fg, BorderSide? side) = switch (_variant) {
+      AppButtonVariant.primary => (
+          color ?? p.brand,
+          textColor ?? p.onBrand,
+          null
+        ),
+      AppButtonVariant.tonal => (p.brandSoft, textColor ?? p.onBrandSoft, null),
+      AppButtonVariant.outline => (
+          Colors.transparent,
+          textColor ?? color ?? p.textPrimary,
+          BorderSide(color: color ?? p.border, width: 1.2)
+        ),
+      AppButtonVariant.text => (
+          Colors.transparent,
+          textColor ?? color ?? p.brand,
+          null
+        ),
+      AppButtonVariant.danger => (
+          p.error,
+          context.isDark ? Colors.black : Colors.white,
+          null
+        ),
+    };
 
-    final child = isLoading
-        ? SizedBox(
-            height: 20,
-            width: 20,
-            child: CircularProgressIndicator(
-              strokeWidth: 2.5,
-              valueColor: AlwaysStoppedAnimation<Color>(
-                isOutlined ? buttonColor : AppColors.white,
-              ),
-            ),
-          )
-        : Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              if (leadingIcon != null) ...[
-                Icon(leadingIcon, size: 20, color: labelColor),
-                const SizedBox(width: 8),
-              ],
-              Text(
-                label,
-                style: AppTypography.labelMedium.copyWith(
-                  color: labelColor,
-                  fontWeight: FontWeight.w600,
+    final height = switch (size) {
+      AppButtonSize.small => 38.0,
+      AppButtonSize.medium => 46.0,
+      AppButtonSize.large => 52.0,
+    };
+    final textStyle = size == AppButtonSize.small
+        ? AppTypography.labelMedium
+        : AppTypography.labelLarge;
+    final hPad = size == AppButtonSize.small ? AppSpacing.md : AppSpacing.xl;
+
+    final child = AnimatedSwitcher(
+      duration: AppMotion.fast,
+      child: isLoading
+          ? SizedBox(
+              key: const ValueKey('loading'),
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2.4, color: fg),
+            )
+          : Row(
+              key: const ValueKey('label'),
+              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (leadingIcon != null) ...[
+                  Icon(leadingIcon,
+                      size: size == AppButtonSize.small ? 18 : 20),
+                  const SizedBox(width: AppSpacing.sm),
+                ],
+                Flexible(
+                  child: Text(label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center),
                 ),
-              ),
-            ],
-          );
+                if (trailingIcon != null) ...[
+                  const SizedBox(width: AppSpacing.sm),
+                  Icon(trailingIcon,
+                      size: size == AppButtonSize.small ? 18 : 20),
+                ],
+              ],
+            ),
+    );
 
-    return SizedBox(
-      width: double.infinity,
-      child: isOutlined
-          ? OutlinedButton(onPressed: isLoading ? null : onPressed, style: style, child: child)
-          : ElevatedButton(onPressed: isLoading ? null : onPressed, style: style, child: child),
+    final button = TextButton(
+      onPressed: enabled ? onPressed : null,
+      style: ButtonStyle(
+        minimumSize: WidgetStatePropertyAll(Size(height, height)),
+        padding: WidgetStatePropertyAll(EdgeInsets.symmetric(horizontal: hPad)),
+        textStyle: WidgetStatePropertyAll(textStyle),
+        shape: WidgetStatePropertyAll(
+          RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(AppSpacing.radiusMd)),
+        ),
+        side: WidgetStatePropertyAll(side),
+        backgroundColor: WidgetStateProperty.resolveWith((s) {
+          if (s.contains(WidgetState.disabled) && !isLoading) {
+            return bg == Colors.transparent ? Colors.transparent : p.surfaceAlt;
+          }
+          return bg;
+        }),
+        foregroundColor: WidgetStateProperty.resolveWith((s) {
+          if (s.contains(WidgetState.disabled) && !isLoading) return p.textHint;
+          return fg;
+        }),
+        overlayColor: WidgetStatePropertyAll(fg.withValues(alpha: 0.08)),
+      ),
+      child: child,
+    );
+
+    return Semantics(
+      button: true,
+      enabled: enabled,
+      label: isLoading ? '$label…' : null,
+      child: SizedBox(
+        width: expand ? double.infinity : null,
+        height: height,
+        child: button,
+      ),
     );
   }
 }

@@ -1,14 +1,12 @@
 import 'package:flutter/material.dart';
 import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 import '../order_timeline_provider.dart';
 
-/// Builds one [GanttStage] per timeline event — each stage runs from its
-/// own timestamp to the next event's timestamp, or to [now] if it's the
-/// most recent (still-ongoing) stage. Shared by every Gantt view so the
-/// stage-color mapping only lives in one place.
-List<GanttStage> ganttStagesFromTimeline(List<OrderTimelineEvent> events, DateTime now) {
+List<GanttStage> ganttStagesFromTimeline(
+    List<OrderTimelineEvent> events, DateTime now) {
   final stages = <GanttStage>[];
   for (var i = 0; i < events.length; i++) {
     final event = events[i];
@@ -25,25 +23,31 @@ List<GanttStage> ganttStagesFromTimeline(List<OrderTimelineEvent> events, DateTi
 
 Color _colorForStatus(String status) {
   switch (status) {
-    case 'pending':   return AppColors.statusPending;
-    case 'confirmed': return AppColors.statusConfirmed;
-    case 'preparing': return AppColors.statusPreparing;
-    case 'ready':     return AppColors.statusReady;
-    case 'picked_up': return AppColors.statusDelivering;
-    case 'delivered': return AppColors.statusDelivered;
-    case 'cancelled': return AppColors.statusCancelled;
-    default:          return AppColors.textHint;
+    case 'pending':
+      return AppColors.statusPending;
+    case 'confirmed':
+      return AppColors.statusConfirmed;
+    case 'preparing':
+      return AppColors.statusPreparing;
+    case 'ready':
+      return AppColors.statusReady;
+    case 'picked_up':
+      return AppColors.statusDelivering;
+    case 'delivered':
+      return AppColors.statusDelivered;
+    case 'cancelled':
+      return AppColors.statusCancelled;
+    default:
+      return AppColors.statusCancelled;
   }
 }
 
-/// One colored stage within a Gantt row (e.g. "preparing", 10:02–10:14).
+/// One colored stage within a Gantt row (e.g.
 class GanttStage {
   final String label;
   final Color color;
   final DateTime start;
 
-  /// Null means this stage is still ongoing — it's drawn out to
-  /// [AppGanttChart.rangeEnd] (usually "now") instead of a fixed width.
   final DateTime? end;
 
   const GanttStage({
@@ -69,11 +73,6 @@ class GanttRow {
   });
 }
 
-/// A horizontal timeline/Gantt chart: one row per item, with colored
-/// segments showing how long it spent in each stage. Built as a plain
-/// proportional-width renderer (Row/Stack) rather than forcing fl_chart's
-/// vertical-bar primitives into a horizontal-timeline shape they don't
-/// fit — no new dependency either way.
 class AppGanttChart extends StatelessWidget {
   final List<GanttRow> rows;
   final DateTime rangeStart;
@@ -87,12 +86,14 @@ class AppGanttChart extends StatelessWidget {
     required this.rangeStart,
     required this.rangeEnd,
     this.labelWidth = 96,
-    this.rowHeight = 40,
+    this.rowHeight = 36,
   });
 
   @override
   Widget build(BuildContext context) {
-    final totalMs = rangeEnd.difference(rangeStart).inMilliseconds.clamp(1, double.maxFinite.toInt());
+    final p = context.palette;
+    final totalMs =
+        rangeEnd.difference(rangeStart).inMilliseconds.clamp(1, 1 << 52);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -104,7 +105,6 @@ class AppGanttChart extends StatelessWidget {
               onTap: row.onTap,
               borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
               child: Row(
-                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
                   SizedBox(
                     width: labelWidth,
@@ -112,43 +112,44 @@ class AppGanttChart extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Text(
-                          row.label,
-                          style: AppTypography.labelSmall,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        if (row.subtitle != null)
-                          Text(
-                            row.subtitle!,
-                            style: AppTypography.bodySmall.copyWith(fontSize: 10),
+                        Text(row.label,
+                            style: AppTypography.labelSmall
+                                .copyWith(color: p.textPrimary),
                             maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
+                            overflow: TextOverflow.ellipsis),
+                        if (row.subtitle != null)
+                          Text(row.subtitle!,
+                              style: AppTypography.bodySmall.copyWith(
+                                  color: p.textSecondary, fontSize: 11),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis),
                       ],
                     ),
                   ),
                   const SizedBox(width: AppSpacing.sm),
                   Expanded(
-                    child: SizedBox(
-                      height: rowHeight,
-                      child: Stack(
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              color: AppColors.divider,
-                              borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-                            ),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        final width = constraints.maxWidth;
+                        return SizedBox(
+                          height: rowHeight,
+                          child: Stack(
+                            children: [
+                              Positioned.fill(
+                                child: DecoratedBox(
+                                  decoration: BoxDecoration(
+                                    color: p.surfaceAlt,
+                                    borderRadius: BorderRadius.circular(
+                                        AppSpacing.radiusSm),
+                                  ),
+                                ),
+                              ),
+                              for (final stage in row.stages)
+                                _segment(stage, width, totalMs),
+                            ],
                           ),
-                          for (final stage in row.stages)
-                            _StageSegment(
-                              stage: stage,
-                              rangeStart: rangeStart,
-                              rangeEnd: rangeEnd,
-                              totalMs: totalMs,
-                            ),
-                        ],
-                      ),
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -158,48 +159,31 @@ class AppGanttChart extends StatelessWidget {
       ],
     );
   }
-}
 
-class _StageSegment extends StatelessWidget {
-  final GanttStage stage;
-  final DateTime rangeStart;
-  final DateTime rangeEnd;
-  final int totalMs;
-
-  const _StageSegment({
-    required this.stage,
-    required this.rangeStart,
-    required this.rangeEnd,
-    required this.totalMs,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final effectiveEnd = stage.end ?? rangeEnd;
-    final startFraction = (stage.start.difference(rangeStart).inMilliseconds / totalMs).clamp(0.0, 1.0);
-    final endFraction = (effectiveEnd.difference(rangeStart).inMilliseconds / totalMs).clamp(0.0, 1.0);
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        final width = constraints.maxWidth;
-        final left = startFraction * width;
-        final segWidth = ((endFraction - startFraction) * width).clamp(2.0, width);
-        return Positioned(
-          left: left,
-          width: segWidth,
-          top: 0,
-          bottom: 0,
-          child: Tooltip(
-            message: stage.label,
-            child: Container(
-              decoration: BoxDecoration(
-                color: stage.color,
-                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              ),
-            ),
+  Widget _segment(GanttStage stage, double width, int totalMs) {
+    final end = stage.end ?? rangeEnd;
+    final startFraction =
+        (stage.start.difference(rangeStart).inMilliseconds / totalMs)
+            .clamp(0.0, 1.0);
+    final endFraction =
+        (end.difference(rangeStart).inMilliseconds / totalMs).clamp(0.0, 1.0);
+    final left = startFraction * width;
+    final segWidth = ((endFraction - startFraction) * width)
+        .clamp(3.0, width - left < 3 ? 3.0 : width - left);
+    return Positioned(
+      left: left,
+      width: segWidth,
+      top: 4,
+      bottom: 4,
+      child: Tooltip(
+        message: stage.label,
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: stage.color,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusXs),
           ),
-        );
-      },
+        ),
+      ),
     );
   }
 }

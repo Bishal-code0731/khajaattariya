@@ -1,49 +1,62 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_colors.dart';
+import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
 
-/// Standard "nothing here yet" state. Replaces the bespoke
-/// `_EmptyOrders`/`_EmptyCart`/`_EmptySearch` private widgets that
-/// each looked slightly different.
+/// "Nothing here yet" — always say what the user can do next ([action]).
 class AppEmptyState extends StatelessWidget {
-  final IconData icon;
-  final String title;
-  final String? subtitle;
-  final Widget? action;
-
   const AppEmptyState({
     super.key,
     required this.icon,
     required this.title,
     this.subtitle,
     this.action,
+    this.compact = false,
   });
+
+  final IconData icon;
+  final String title;
+  final String? subtitle;
+  final Widget? action;
+  final bool compact;
 
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 72, color: AppColors.textHint),
-            const SizedBox(height: AppSpacing.lg),
-            Text(title, style: AppTypography.headingSmall, textAlign: TextAlign.center),
-            if (subtitle != null) ...[
-              const SizedBox(height: AppSpacing.sm),
-              Text(
-                subtitle!,
-                style: AppTypography.bodyMedium,
-                textAlign: TextAlign.center,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Padding(
+          padding: EdgeInsets.all(compact ? AppSpacing.lg : AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: compact ? 64 : 88,
+                height: compact ? 64 : 88,
+                decoration:
+                    BoxDecoration(color: p.brandSoft, shape: BoxShape.circle),
+                child:
+                    Icon(icon, size: compact ? 30 : 40, color: p.onBrandSoft),
               ),
+              SizedBox(height: compact ? AppSpacing.md : AppSpacing.lg),
+              Text(title,
+                  style: AppTypography.headingMedium
+                      .copyWith(color: p.textPrimary),
+                  textAlign: TextAlign.center),
+              if (subtitle != null) ...[
+                const SizedBox(height: AppSpacing.sm),
+                Text(subtitle!,
+                    style: AppTypography.bodyMedium
+                        .copyWith(color: p.textSecondary),
+                    textAlign: TextAlign.center),
+              ],
+              if (action != null) ...[
+                const SizedBox(height: AppSpacing.xl),
+                action!,
+              ],
             ],
-            if (action != null) ...[
-              const SizedBox(height: AppSpacing.lg),
-              action!,
-            ],
-          ],
+          ),
         ),
       ),
     );

@@ -1,48 +1,68 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_colors.dart';
+import '../../core/errors/user_message.dart';
+import '../../core/l10n/s.dart';
+import '../../core/theme/app_palette.dart';
 import '../../core/theme/app_spacing.dart';
 import '../../core/theme/app_typography.dart';
+import 'app_button.dart';
 
-/// Standard "something went wrong" state with an optional retry
-/// action. Replaces the 3+ inconsistent inline error UIs that used
-/// to be hand-rolled per screen (plain text, icon+text+retry, or
-/// silently swallowed into a blank SizedBox).
+/// Load failed.
 class AppErrorState extends StatelessWidget {
-  final String message;
+  const AppErrorState({
+    super.key,
+    this.message,
+    this.error,
+    this.onRetry,
+    this.icon = Icons.cloud_off_rounded,
+  });
+
+  final String? message;
+  final Object? error;
   final VoidCallback? onRetry;
   final IconData icon;
 
-  const AppErrorState({
-    super.key,
-    this.message = 'Something went wrong. Please try again.',
-    this.onRetry,
-    this.icon = Icons.error_outline_rounded,
-  });
-
   @override
   Widget build(BuildContext context) {
+    final p = context.palette;
+    final c = context.s.common;
+    final text =
+        message ?? (error != null ? userMessage(context, error) : c.errGeneric);
     return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(AppSpacing.xl),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 48, color: AppColors.error),
-            const SizedBox(height: AppSpacing.md),
-            Text(
-              message,
-              textAlign: TextAlign.center,
-              style: AppTypography.bodyMedium,
-            ),
-            if (onRetry != null) ...[
-              const SizedBox(height: AppSpacing.md),
-              TextButton.icon(
-                onPressed: onRetry,
-                icon: const Icon(Icons.refresh_rounded, size: 18),
-                label: const Text('Retry'),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 360),
+        child: Padding(
+          padding: const EdgeInsets.all(AppSpacing.xl),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 72,
+                height: 72,
+                decoration:
+                    BoxDecoration(color: p.errorSoft, shape: BoxShape.circle),
+                child: Icon(icon, size: 34, color: p.error),
               ),
+              const SizedBox(height: AppSpacing.lg),
+              Text(c.errorTitle,
+                  style: AppTypography.headingMedium
+                      .copyWith(color: p.textPrimary)),
+              const SizedBox(height: AppSpacing.sm),
+              Text(text,
+                  textAlign: TextAlign.center,
+                  style: AppTypography.bodyMedium
+                      .copyWith(color: p.textSecondary)),
+              if (onRetry != null) ...[
+                const SizedBox(height: AppSpacing.xl),
+                AppButton(
+                  label: c.retry,
+                  onPressed: onRetry,
+                  variant: AppButtonVariant.outline,
+                  leadingIcon: Icons.refresh_rounded,
+                  expand: false,
+                ),
+              ],
             ],
-          ],
+          ),
         ),
       ),
     );

@@ -1,16 +1,8 @@
 import 'package:flutter/material.dart';
-import '../../core/theme/app_colors.dart';
+import 'app_card.dart';
 
-/// Glassmorphism card used throughout the app.
-/// Adapts between light and dark modes automatically.
+/// Legacy name kept so older screens compile.
 class GlassCard extends StatelessWidget {
-  final Widget child;
-  final EdgeInsetsGeometry? padding;
-  final EdgeInsetsGeometry? margin;
-  final double borderRadius;
-  final VoidCallback? onTap;
-  final double? elevation;
-
   const GlassCard({
     super.key,
     required this.child,
@@ -21,40 +13,20 @@ class GlassCard extends StatelessWidget {
     this.elevation,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final EdgeInsetsGeometry? margin;
+  final double borderRadius;
+  final VoidCallback? onTap;
+  final double? elevation;
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
+  @override
+  Widget build(BuildContext context) => AppCard(
+        padding: padding ?? EdgeInsets.zero,
         margin: margin,
-        decoration: BoxDecoration(
-          color: isDark ? AppColors.glassDark : AppColors.glassLight,
-          borderRadius: BorderRadius.circular(borderRadius),
-          border: Border.all(
-            color:
-                isDark ? AppColors.glassBorderDark : AppColors.glassBorderLight,
-            width: 1,
-          ),
-          boxShadow: isDark
-              ? null
-              : [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.04),
-                    blurRadius: 6 + (elevation ?? 6),
-                    offset: Offset(0, 1 + (elevation ?? 6) / 6),
-                  ),
-                ],
-        ),
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(borderRadius),
-          child: Padding(
-            padding: padding ?? EdgeInsets.zero,
-            child: child,
-          ),
-        ),
-      ),
-    );
-  }
+        radius: borderRadius,
+        onTap: onTap,
+        elevated: (elevation ?? 0) > 0,
+        child: child,
+      );
 }

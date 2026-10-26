@@ -7,22 +7,6 @@ import '../../core/utils/app_logger.dart';
 import '../../features/auth/application/auth_provider.dart';
 import 'app_snackbar.dart';
 
-/// Wraps every routed screen so the Android hardware back button (and
-/// the iOS swipe-back gesture) always does something sensible instead
-/// of silently exiting the app.
-///
-/// Most screens in this app are reached via `go()` from the side menu
-/// or bottom nav, which replaces the whole navigation stack — so by the
-/// time the user presses back there's nothing left to pop, and Flutter's
-/// default behaviour is to close the app. This widget intercepts that:
-///  - If there IS something to pop (screen was reached via `push`),
-///    pop normally — no change in behaviour.
-///  - If there's nothing to pop and this is a top-level "home" screen
-///    for the signed-in role ([isAppRoot]), require a second back press
-///    within 2s to exit (standard Android pattern) instead of exiting
-///    immediately.
-///  - Otherwise (a secondary screen with an empty stack), send the user
-///    back to their role's home screen rather than exiting the app.
 class AppBackGuard extends ConsumerStatefulWidget {
   final Widget child;
   final bool isAppRoot;
@@ -61,7 +45,8 @@ class _AppBackGuardState extends ConsumerState<AppBackGuard> {
 
     final user = ref.read(authStateProvider).valueOrNull;
     final fallback = user?.userRole.homeRoute ?? RouteNames.home;
-    AppLogger.nav('AppBackGuard: empty stack on non-root screen, returning to $fallback');
+    AppLogger.nav(
+        'AppBackGuard: empty stack on non-root screen, returning to $fallback');
     context.go(fallback);
   }
 
