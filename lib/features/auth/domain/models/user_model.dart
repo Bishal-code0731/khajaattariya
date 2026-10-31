@@ -30,11 +30,6 @@ class UserModel {
   bool get isAdmin => userRole == UserRole.admin;
 
   factory UserModel.fromMap(Map<String, dynamic> map, String email) {
-    // The handle_new_user trigger can momentarily leave columns
-    // unpopulated right after signup (this is exactly why
-    // _fetchProfileWithRetry exists) — defaulting instead of a hard
-    // cast means a transiently-null column degrades gracefully instead
-    // of throwing a TypeError that skips the retry logic entirely.
     return UserModel(
       id: map['id'] as String,
       fullName: map['full_name'] as String? ?? '',
@@ -43,7 +38,8 @@ class UserModel {
       role: map['role'] as String? ?? 'customer',
       avatarUrl: map['avatar_url'] as String?,
       isActive: map['is_active'] as bool? ?? true,
-      createdAt: DateTime.tryParse(map['created_at'] as String? ?? '') ?? DateTime.now(),
+      createdAt: DateTime.tryParse(map['created_at'] as String? ?? '') ??
+          DateTime.now(),
     );
   }
 
