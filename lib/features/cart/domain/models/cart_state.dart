@@ -1,7 +1,6 @@
 import 'cart_item_model.dart';
 
-/// One restaurant's items within the cart. A cart can hold items from
-/// several restaurants at once — checkout places one order per group.
+/// One restaurant's items within the cart.
 class CartRestaurantGroup {
   final String restaurantId;
   final String restaurantName;
@@ -33,6 +32,17 @@ class CartState {
   bool get isEmpty => groups.isEmpty;
   int get totalItems => groups.fold(0, (sum, g) => sum + g.totalItems);
   double get totalAmount => groups.fold(0.0, (sum, g) => sum + g.subtotal);
+
+  /// How many of one dish are in the cart (0 when absent).
+  int quantityOf(String restaurantId, String foodId) {
+    for (final g in groups) {
+      if (g.restaurantId != restaurantId) continue;
+      for (final i in g.items) {
+        if (i.food.id == foodId) return i.quantity;
+      }
+    }
+    return 0;
+  }
 
   CartState copyWith({List<CartRestaurantGroup>? groups}) {
     return CartState(groups: groups ?? this.groups);

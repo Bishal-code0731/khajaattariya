@@ -5,22 +5,15 @@ import '../../home/domain/models/food_item_model.dart';
 
 part 'cart_notifier.g.dart';
 
-// keepAlive: true preserves the old StateNotifierProvider's behavior of
-// living for the whole app session — the cart must not reset just
-// because the cart screen was unmounted.
 @Riverpod(keepAlive: true)
 class CartNotifier extends _$CartNotifier {
   @override
   CartState build() => const CartState();
 
-  /// Adds an item to its restaurant's group, creating the group if this
-  /// is the first item from that restaurant. Unlike the old single-
-  /// restaurant cart, adding from a different restaurant no longer
-  /// conflicts — it just becomes a second group, and checkout places
-  /// one order per group.
   void addItem(FoodItemModel food) {
     final groups = [...state.groups];
-    final groupIndex = groups.indexWhere((g) => g.restaurantId == food.restaurantId);
+    final groupIndex =
+        groups.indexWhere((g) => g.restaurantId == food.restaurantId);
 
     if (groupIndex == -1) {
       groups.add(CartRestaurantGroup(
@@ -33,8 +26,8 @@ class CartNotifier extends _$CartNotifier {
       final itemIndex = group.items.indexWhere((i) => i.food.id == food.id);
       final updatedItems = [...group.items];
       if (itemIndex >= 0) {
-        updatedItems[itemIndex] =
-            updatedItems[itemIndex].copyWith(quantity: updatedItems[itemIndex].quantity + 1);
+        updatedItems[itemIndex] = updatedItems[itemIndex]
+            .copyWith(quantity: updatedItems[itemIndex].quantity + 1);
       } else {
         updatedItems.add(CartItem(food: food, quantity: 1));
       }
@@ -57,7 +50,9 @@ class CartNotifier extends _$CartNotifier {
     _updateGroup(restaurantId, (items) {
       return items
           .map((i) {
-            if (i.food.id == foodId) return i.copyWith(quantity: i.quantity - 1);
+            if (i.food.id == foodId) {
+              return i.copyWith(quantity: i.quantity - 1);
+            }
             return i;
           })
           .where((i) => i.quantity > 0)
@@ -66,18 +61,21 @@ class CartNotifier extends _$CartNotifier {
   }
 
   void removeItem(String restaurantId, String foodId) {
-    _updateGroup(restaurantId, (items) => items.where((i) => i.food.id != foodId).toList());
+    _updateGroup(restaurantId,
+        (items) => items.where((i) => i.food.id != foodId).toList());
   }
 
   /// Removes just one restaurant's items, leaving the others untouched.
   void clearRestaurant(String restaurantId) {
-    final groups = state.groups.where((g) => g.restaurantId != restaurantId).toList();
+    final groups =
+        state.groups.where((g) => g.restaurantId != restaurantId).toList();
     state = state.copyWith(groups: groups);
   }
 
   void clearCart() => state = const CartState();
 
-  void _updateGroup(String restaurantId, List<CartItem> Function(List<CartItem>) update) {
+  void _updateGroup(
+      String restaurantId, List<CartItem> Function(List<CartItem>) update) {
     final groups = [...state.groups];
     final groupIndex = groups.indexWhere((g) => g.restaurantId == restaurantId);
     if (groupIndex == -1) return;

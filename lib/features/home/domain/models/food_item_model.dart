@@ -10,6 +10,13 @@ class FoodItemModel {
   final int deliveryTimeMin;
   final bool isVeg;
   final String? offer;
+  final String? description;
+
+  /// False when the restaurant marked the dish as sold out.
+  final bool isAvailable;
+
+  /// The restaurant's open/closed switch (the server rejects orders for closed restaurants).
+  final bool restaurantOpen;
 
   const FoodItemModel({
     required this.id,
@@ -23,6 +30,9 @@ class FoodItemModel {
     required this.deliveryTimeMin,
     required this.isVeg,
     this.offer,
+    this.description,
+    this.isAvailable = true,
+    this.restaurantOpen = true,
   });
 
   factory FoodItemModel.fromMap(Map<String, dynamic> map) {
@@ -40,6 +50,9 @@ class FoodItemModel {
       deliveryTimeMin: restaurant['delivery_time_min'] as int? ?? 30,
       isVeg: map['is_veg'] as bool? ?? false,
       offer: map['offer'] as String?,
+      description: map['description'] as String?,
+      isAvailable: map['is_available'] as bool? ?? true,
+      restaurantOpen: restaurant['is_open'] as bool? ?? true,
     );
   }
 }

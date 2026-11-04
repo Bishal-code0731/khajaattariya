@@ -1,4 +1,8 @@
-enum TicketStatus { open, inProgress, resolved, closed;
+enum TicketStatus {
+  open,
+  inProgress,
+  resolved,
+  closed;
 
   static TicketStatus fromString(String value) {
     switch (value) {
@@ -51,6 +55,11 @@ class TicketModel {
   final String priority;
   final DateTime createdAt;
 
+  /// Last change to the ticket (falls back to [createdAt]).
+  final DateTime? updatedAt;
+
+  DateTime get lastActivity => updatedAt ?? createdAt;
+
   const TicketModel({
     required this.id,
     required this.customerId,
@@ -61,6 +70,7 @@ class TicketModel {
     required this.status,
     required this.priority,
     required this.createdAt,
+    this.updatedAt,
   });
 
   factory TicketModel.fromMap(Map<String, dynamic> map) {
@@ -75,6 +85,7 @@ class TicketModel {
       status: TicketStatus.fromString(map['status'] as String),
       priority: map['priority'] as String? ?? 'normal',
       createdAt: DateTime.parse(map['created_at'] as String),
+      updatedAt: DateTime.tryParse(map['updated_at'] as String? ?? ''),
     );
   }
 }

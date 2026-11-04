@@ -1,5 +1,5 @@
 import 'dart:async';
-import 'package:riverpod/riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import 'package:geolocator/geolocator.dart';
 import '../../../main.dart';
@@ -7,8 +7,7 @@ import '../domain/models/delivery_position_model.dart';
 
 part 'tracking_provider.g.dart';
 
-/// Latest known rider position for one order. `delivery_tracking` is
-/// realtime-enabled, so this stays live while the customer watches.
+/// Latest known rider position for one order.
 @riverpod
 Stream<DeliveryPositionModel?> orderPosition(Ref ref, String orderId) {
   return supabase
@@ -17,14 +16,10 @@ Stream<DeliveryPositionModel?> orderPosition(Ref ref, String orderId) {
       .eq('order_id', orderId)
       .order('recorded_at', ascending: false)
       .limit(1)
-      .map((rows) => rows.isEmpty ? null : DeliveryPositionModel.fromMap(rows.first));
+      .map((rows) =>
+          rows.isEmpty ? null : DeliveryPositionModel.fromMap(rows.first));
 }
 
-/// Broadcasts the rider's device location for an active delivery on a
-/// throttled interval — NOT continuous — to keep `delivery_tracking`
-/// row growth bounded on the free-tier database. Call [start] once an
-/// order is picked up and [stop] once it's delivered/cancelled or the
-/// rider goes offline.
 @Riverpod(keepAlive: true)
 class RiderLocationBroadcaster extends _$RiderLocationBroadcaster {
   Timer? _timer;
@@ -43,7 +38,8 @@ class RiderLocationBroadcaster extends _$RiderLocationBroadcaster {
 
     state = true;
     await _sendOnce(orderId: orderId, riderId: riderId);
-    _timer = Timer.periodic(_interval, (_) => _sendOnce(orderId: orderId, riderId: riderId));
+    _timer = Timer.periodic(
+        _interval, (_) => _sendOnce(orderId: orderId, riderId: riderId));
   }
 
   void stop() {
@@ -58,13 +54,16 @@ class RiderLocationBroadcaster extends _$RiderLocationBroadcaster {
     if (permission == LocationPermission.denied) {
       permission = await Geolocator.requestPermission();
     }
-    return permission == LocationPermission.always || permission == LocationPermission.whileInUse;
+    return permission == LocationPermission.always ||
+        permission == LocationPermission.whileInUse;
   }
 
-  Future<void> _sendOnce({required String orderId, required String riderId}) async {
+  Future<void> _sendOnce(
+      {required String orderId, required String riderId}) async {
     try {
       final position = await Geolocator.getCurrentPosition(
-        locationSettings: const LocationSettings(accuracy: LocationAccuracy.high),
+        locationSettings:
+            const LocationSettings(accuracy: LocationAccuracy.high),
       );
       await supabase.from('delivery_tracking').insert({
         'order_id': orderId,

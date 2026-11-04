@@ -1,4 +1,4 @@
-import 'package:riverpod/riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../main.dart';
 import '../domain/models/rating_model.dart';
@@ -7,7 +7,8 @@ part 'rating_provider.g.dart';
 
 /// All reviews for a restaurant, most recent first.
 @Riverpod(keepAlive: true)
-Future<List<RatingModel>> restaurantRatings(Ref ref, String restaurantId) async {
+Future<List<RatingModel>> restaurantRatings(
+    Ref ref, String restaurantId) async {
   final data = await supabase
       .from('ratings')
       .select('*, profiles!customer_id(full_name)')

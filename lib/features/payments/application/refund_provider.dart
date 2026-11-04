@@ -1,9 +1,14 @@
-import 'package:riverpod/riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../main.dart';
 import '../domain/models/refund_model.dart';
 
 part 'refund_provider.g.dart';
+
+/// The order has no completed payment, so there is nothing to refund.
+class NoRefundablePaymentException implements Exception {
+  const NoRefundablePaymentException();
+}
 
 /// A customer's own refund requests, most recent first.
 @Riverpod(keepAlive: true)
@@ -23,7 +28,8 @@ Future<List<RefundModel>> customerRefunds(Ref ref, String customerId) async {
 Future<List<Map<String, dynamic>>> allRefunds(Ref ref) async {
   final data = await supabase
       .from('refunds')
-      .select('*, orders(customer_id, total_amount, profiles!customer_id(full_name))')
+      .select(
+          '*, orders(customer_id, total_amount, profiles!customer_id(full_name))')
       .order('created_at', ascending: false);
   return List<Map<String, dynamic>>.from(data);
 }
@@ -42,18 +48,15 @@ class RefundNotifier extends _$RefundNotifier {
     try {
       final payment = await supabase
           .from('payments')
-          .select('id, status')
+          .select('id')
           .eq('order_id', orderId)
+          .eq('status', 'completed')
+          .limit(1)
           .maybeSingle();
       if (payment == null) {
-        throw Exception('No payment found for this order.');
+        throw const NoRefundablePaymentException();
       }
-      // A refund only makes sense once money was actually captured — a
-      // cancelled order with a still-pending/failed payment row has
-      // nothing to refund.
-      if (payment['status'] != 'completed') {
-        throw Exception('This order has no completed payment to refund.');
-      }
+      // The database caps the amount at what was actually paid.
       await supabase.from('refunds').insert({
         'payment_id': payment['id'],
         'order_id': orderId,
@@ -72,10 +75,15 @@ class RefundNotifier extends _$RefundNotifier {
   Future<bool> updateStatus(String refundId, String status) async {
     state = const AsyncValue.loading();
     try {
-      final updated = await supabase.from('refunds').update({
-        'status': status,
-        if (status != 'pending') 'processed_at': DateTime.now().toIso8601String(),
-      }).eq('id', refundId).select('id');
+      final updated = await supabase
+          .from('refunds')
+          .update({
+            'status': status,
+            if (status != 'pending')
+              'processed_at': DateTime.now().toIso8601String(),
+          })
+          .eq('id', refundId)
+          .select('id');
       if (updated.isEmpty) {
         throw Exception('Could not update refund. Please try again.');
       }

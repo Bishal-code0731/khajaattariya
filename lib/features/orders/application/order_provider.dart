@@ -1,4 +1,4 @@
-import 'package:riverpod/riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../main.dart';
 import '../../cart/domain/models/cart_state.dart';
@@ -25,10 +25,9 @@ Future<OrderModel> orderById(Ref ref, String orderId) {
   return ref.watch(orderRepositoryProvider).getOrderById(orderId);
 }
 
-/// Attaches `order_items` and `restaurants.name` to a batch of raw order
-/// rows using at most 2 extra queries total (batched with `.inFilter`),
-/// instead of 2 extra queries PER row per stream emission. Also means a
-/// single missing/deleted related row no longer blows up the entire list.
+/// Restaurant columns the order screens show (name, photo, phone, map pin).
+const _restaurantColumns = 'id, name, image_url, phone, latitude, longitude';
+
 Future<List<OrderModel>> _hydrateOrders(List<Map<String, dynamic>> rows) async {
   if (rows.isEmpty) return [];
 
@@ -42,7 +41,7 @@ Future<List<OrderModel>> _hydrateOrders(List<Map<String, dynamic>> rows) async {
       .inFilter('order_id', orderIds);
   final restaurantRows = await supabase
       .from('restaurants')
-      .select('id, name')
+      .select(_restaurantColumns)
       .inFilter('id', restaurantIds);
 
   final itemsByOrder = <String, List<Map<String, dynamic>>>{};
@@ -56,21 +55,14 @@ Future<List<OrderModel>> _hydrateOrders(List<Map<String, dynamic>> rows) async {
   return rows.map((row) {
     return OrderModel.fromMap({
       ...row,
-      'restaurants': restaurantById[row['restaurant_id']] ?? {'name': 'Unknown'},
+      'restaurants':
+          restaurantById[row['restaurant_id']] ?? const <String, dynamic>{},
       'order_items': itemsByOrder[row['id']] ?? const [],
     });
   }).toList();
 }
 
-// Realtime order streams are capped so a restaurant/customer with a long
-// history doesn't pull (and keep re-hydrating on every change event) an
-// ever-growing payload — the UI only ever shows recent orders anyway.
 const _ordersStreamLimit = 100;
-
-// autoDispose (the @riverpod default) on all of these: each is only
-// needed while its owning screen (dashboard/orders list/tracking) is
-// open. Previously these stayed subscribed for the whole app session
-// once first watched.
 
 // Restaurant incoming orders — stream for real-time updates
 @riverpod
@@ -116,9 +108,6 @@ Stream<OrderModel?> riderActiveOrder(Ref ref, String riderId) {
       .map((orders) => orders.isEmpty ? null : orders.first);
 }
 
-// Rider's own orders today (for the delivery-schedule Gantt view) —
-// a plain fetch rather than a stream since it's just for the timeline
-// chart, not for driving live UI state elsewhere.
 @riverpod
 Future<List<OrderModel>> riderOrdersToday(Ref ref, String riderId) async {
   final today = DateTime.now();
@@ -167,8 +156,6 @@ Future<bool> orderRating(Ref ref, String orderId) async {
   return data != null;
 }
 
-// Place order notifier — returns one OrderModel per restaurant group in
-// the cart (a multi-restaurant cart places multiple orders at once).
 @Riverpod(keepAlive: true)
 class PlaceOrder extends _$PlaceOrder {
   @override
@@ -181,12 +168,13 @@ class PlaceOrder extends _$PlaceOrder {
     String? notes,
   }) async {
     state = const AsyncValue.loading();
-    final result = await AsyncValue.guard(() => ref.read(orderRepositoryProvider).placeOrder(
-      cart: cart,
-      customerId: customerId,
-      deliveryAddress: deliveryAddress,
-      notes: notes,
-    ));
+    final result = await AsyncValue.guard(
+        () => ref.read(orderRepositoryProvider).placeOrder(
+              cart: cart,
+              customerId: customerId,
+              deliveryAddress: deliveryAddress,
+              notes: notes,
+            ));
     state = result;
     return result.valueOrNull;
   }
@@ -201,17 +189,15 @@ class OrderStatusNotifier extends _$OrderStatusNotifier {
   Future<bool> updateStatus(String orderId, OrderStatus newStatus) async {
     state = const AsyncValue.loading();
     try {
-      // Without .select(), a 0-row update (e.g. silently blocked by an
-      // RLS policy that doesn't match this caller) reports success with
-      // no error and no visible effect — this makes that failure mode
-      // surface as a real error instead.
+      // Without .select(), a 0-row update (e.g.
       final updated = await supabase
           .from('orders')
           .update({'status': _statusToString(newStatus)})
           .eq('id', orderId)
           .select('id');
       if (updated.isEmpty) {
-        throw Exception('Order not found or you don\'t have permission to update it.');
+        throw Exception(
+            'Order not found or you don\'t have permission to update it.');
       }
       state = const AsyncValue.data(null);
       return true;
@@ -224,14 +210,15 @@ class OrderStatusNotifier extends _$OrderStatusNotifier {
   Future<bool> assignRider(String orderId, String riderId) async {
     state = const AsyncValue.loading();
     try {
-      // .is_('rider_id', null) is the guard that prevents two riders who
-      // tap "Accept" at the same moment from both successfully claiming
-      // the same order — whichever write lands first wins, and the
-      // second one now correctly matches 0 rows instead of overwriting it.
-      final updated = await supabase.from('orders').update({
-        'rider_id': riderId,
-        'status': 'picked_up',
-      }).eq('id', orderId).isFilter('rider_id', null).select('id');
+      final updated = await supabase
+          .from('orders')
+          .update({
+            'rider_id': riderId,
+            'status': 'picked_up',
+          })
+          .eq('id', orderId)
+          .isFilter('rider_id', null)
+          .select('id');
       if (updated.isEmpty) {
         throw Exception('This order was already taken by another rider.');
       }

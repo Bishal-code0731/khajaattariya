@@ -18,15 +18,7 @@ RestaurantRepository restaurantRepository(Ref ref) {
 
 const _restaurantsPageSize = 20;
 
-/// Paginated restaurant list for the home screen. Exposes the same
-/// `AsyncValue<List<RestaurantModel>>` shape a `FutureProvider` would
-/// (so existing `.when(...)` call sites don't change), plus [loadMore]
-/// / [hasMore] for infinite scroll instead of fetching every restaurant
-/// up front.
-///
-/// keepAlive: true preserves the old StateNotifierProvider's behavior of
-/// living for the whole app session (the home feed shouldn't reset and
-/// re-fetch every time the screen is briefly unmounted).
+/// Paginated restaurant list for the home screen.
 @Riverpod(keepAlive: true)
 class Restaurants extends _$Restaurants {
   late final RestaurantRepository _repository;
@@ -42,10 +34,6 @@ class Restaurants extends _$Restaurants {
   }
 
   Future<void> _loadFirstPage() async {
-    // Offline-first: show whatever's on disk instantly (no spinner), then
-    // silently replace it once the network call resolves. If we're
-    // actually offline, the network call below fails and we just keep
-    // showing the cached page — the OfflineBanner explains why.
     final cached = await LocalStore.instance
         .loadList(RestaurantRepositoryImpl.restaurantsFirstPageDiskKey);
     if (cached != null) {
@@ -55,7 +43,8 @@ class Restaurants extends _$Restaurants {
     }
 
     try {
-      final fresh = await _repository.getRestaurants(page: 0, pageSize: _restaurantsPageSize);
+      final fresh = await _repository.getRestaurants(
+          page: 0, pageSize: _restaurantsPageSize);
       state = AsyncValue.data(fresh);
       _page = 0;
       hasMore = fresh.length >= _restaurantsPageSize;
@@ -82,8 +71,6 @@ class Restaurants extends _$Restaurants {
       hasMore = more.length >= _restaurantsPageSize;
       state = AsyncValue.data([...current, ...more]);
     } catch (_) {
-      // Keep showing what we already have; the user can trigger another
-      // loadMore by scrolling again instead of losing the whole list.
     } finally {
       _isLoadingMore = false;
     }
@@ -92,11 +79,10 @@ class Restaurants extends _$Restaurants {
   Future<void> refresh() => _loadFirstPage();
 }
 
-// Popular items — used in home screen. Offline-first: instant from disk,
-// then refreshed from the network (see OfflineFirstListNotifier).
-final popularItemsProvider =
-StateNotifierProvider<OfflineFirstListNotifier<FoodItemModel>, AsyncValue<List<FoodItemModel>>>(
-    (ref) {
+// Popular items — used in home screen.
+final popularItemsProvider = StateNotifierProvider<
+    OfflineFirstListNotifier<FoodItemModel>,
+    AsyncValue<List<FoodItemModel>>>((ref) {
   final repo = ref.watch(restaurantRepositoryProvider);
   return OfflineFirstListNotifier(
     diskKey: RestaurantRepositoryImpl.popularItemsDiskKey,
@@ -105,18 +91,16 @@ StateNotifierProvider<OfflineFirstListNotifier<FoodItemModel>, AsyncValue<List<F
   );
 });
 
-// Foods filtered to one category — used when a category chip is
-// selected on the home screen. autoDispose since it's only relevant
-// while that filter is active, unlike the always-shown popular list.
-final foodsByCategoryProvider =
-FutureProvider.autoDispose.family<List<FoodItemModel>, String>((ref, categoryId) {
+// Foods filtered to one category — used when a category chip is selected on the home screen.
+final foodsByCategoryProvider = FutureProvider.autoDispose
+    .family<List<FoodItemModel>, String>((ref, categoryId) {
   return ref.watch(restaurantRepositoryProvider).getFoodsByCategory(categoryId);
 });
 
-// Categories — used in home screen category section. Offline-first.
-final categoriesProvider =
-StateNotifierProvider<OfflineFirstListNotifier<CategoryModel>, AsyncValue<List<CategoryModel>>>(
-    (ref) {
+// Categories — used in home screen category section.
+final categoriesProvider = StateNotifierProvider<
+    OfflineFirstListNotifier<CategoryModel>,
+    AsyncValue<List<CategoryModel>>>((ref) {
   final repo = ref.watch(restaurantRepositoryProvider);
   return OfflineFirstListNotifier(
     diskKey: RestaurantRepositoryImpl.categoriesDiskKey,
@@ -126,13 +110,10 @@ StateNotifierProvider<OfflineFirstListNotifier<CategoryModel>, AsyncValue<List<C
 });
 
 // Menu items per restaurant — used in restaurant detail screen.
-// Offline-first + autoDispose: this data is only relevant while that
-// screen is open, so the in-memory AsyncValue is released once the user
-// navigates away; the disk cache (written by the repository) is what
-// makes it available instantly again offline or on the next visit.
-final menuItemsProvider = StateNotifierProvider.autoDispose
-    .family<OfflineFirstListNotifier<FoodItemModel>, AsyncValue<List<FoodItemModel>>, String>(
-        (ref, restaurantId) {
+final menuItemsProvider = StateNotifierProvider.autoDispose.family<
+    OfflineFirstListNotifier<FoodItemModel>,
+    AsyncValue<List<FoodItemModel>>,
+    String>((ref, restaurantId) {
   final repo = ref.watch(restaurantRepositoryProvider);
   return OfflineFirstListNotifier(
     diskKey: RestaurantRepositoryImpl.menuItemsDiskKey(restaurantId),
@@ -141,13 +122,10 @@ final menuItemsProvider = StateNotifierProvider.autoDispose
   );
 });
 
-final restaurantByIdProvider =
-FutureProvider.autoDispose.family<RestaurantModel?, String>((ref, id) async {
-  final data = await supabase
-      .from('restaurants')
-      .select()
-      .eq('id', id)
-      .maybeSingle();
+final restaurantByIdProvider = FutureProvider.autoDispose
+    .family<RestaurantModel?, String>((ref, id) async {
+  final data =
+      await supabase.from('restaurants').select().eq('id', id).maybeSingle();
   if (data == null) return null;
   return RestaurantModel.fromMap(data);
 });
@@ -157,6 +135,6 @@ final bannersProvider = FutureProvider<List<Map<String, dynamic>>>((ref) async {
       .from('banners')
       .select()
       .eq('is_active', true)
-      .order('sort_order');
+      .order('sort_order', ascending: true);
   return List<Map<String, dynamic>>.from(data as List);
 });

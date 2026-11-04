@@ -3,6 +3,9 @@ class CategoryModel {
   final String name;
   final String? imageUrl;
   final String? iconEmoji;
+
+  /// Optional icon key (`icon_name` column) mapped to a Material icon in the UI.
+  final String? iconName;
   final bool isActive;
   final int sortOrder;
 
@@ -11,6 +14,7 @@ class CategoryModel {
     required this.name,
     this.imageUrl,
     this.iconEmoji,
+    this.iconName,
     required this.isActive,
     required this.sortOrder,
   });
@@ -19,15 +23,9 @@ class CategoryModel {
     return CategoryModel(
       id: map['id'] as String,
       name: map['name'] as String,
-      // The categories table has no image_url column — imageUrl stays
-      // null until/unless that's added; the real per-category visual is
-      // the emoji column below.
       imageUrl: map['image_url'] as String?,
-      // Was reading 'icon_emoji', a column that doesn't exist in the
-      // live schema (the actual column is just 'emoji') — every
-      // category silently fell back to the default 🍽️ regardless of
-      // what was actually set in the database.
       iconEmoji: map['emoji'] as String?,
+      iconName: map['icon_name'] as String?,
       isActive: map['is_active'] as bool? ?? true,
       sortOrder: map['sort_order'] as int? ?? 0,
     );

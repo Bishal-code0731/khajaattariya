@@ -6,6 +6,9 @@ class FavoriteModel {
   final String restaurantImageUrl;
   final String cuisineType;
   final double rating;
+
+  /// Typical delivery time in minutes (null when unknown).
+  final int? deliveryTimeMin;
   final DateTime createdAt;
 
   const FavoriteModel({
@@ -16,6 +19,7 @@ class FavoriteModel {
     required this.restaurantImageUrl,
     required this.cuisineType,
     required this.rating,
+    this.deliveryTimeMin,
     required this.createdAt,
   });
 
@@ -29,6 +33,7 @@ class FavoriteModel {
       restaurantImageUrl: restaurant['image_url'] as String? ?? '',
       cuisineType: restaurant['cuisine_type'] as String? ?? '',
       rating: (restaurant['rating'] as num?)?.toDouble() ?? 0.0,
+      deliveryTimeMin: (restaurant['delivery_time_min'] as num?)?.toInt(),
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }

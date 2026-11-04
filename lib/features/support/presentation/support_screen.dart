@@ -1,227 +1,164 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
+import '../../../core/l10n/s.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
-import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/app_typography.dart';
-import '../../../features/auth/application/auth_provider.dart';
+import '../../../core/theme/app_text_styles.dart';
+import '../../../core/utils/formatters.dart';
 import '../../../shared/widgets/app_button.dart';
-import '../../../shared/widgets/app_snackbar.dart';
-import '../../../shared/widgets/app_text_field.dart';
+import '../../../shared/widgets/app_card.dart';
+import '../../../shared/widgets/app_top_bar.dart';
 import '../../../shared/widgets/empty_state_view.dart';
 import '../../../shared/widgets/error_state_view.dart';
-import '../../../shared/widgets/glass_card.dart';
-import '../../../shared/widgets/loading_indicator.dart';
+import '../../../shared/widgets/shimmer_loader.dart';
+import '../../auth/application/auth_provider.dart';
+import '../../profile/presentation/widgets/account_bottom_bar.dart';
 import '../application/support_provider.dart';
 import '../domain/models/ticket_model.dart';
+import 'widgets/new_ticket_sheet.dart';
+import 'widgets/ticket_status_chip.dart';
 
+/// The user's support requests and a way to open a new one.
 class SupportScreen extends ConsumerWidget {
   const SupportScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final a = context.s.account;
     final user = ref.watch(authStateProvider).valueOrNull;
-
     if (user == null) {
       return Scaffold(
-        appBar: AppBar(title: const Text('Help & Support')),
-        body: const AppEmptyState(
-          icon: Icons.lock_outline_rounded,
-          title: 'Please log in',
-          subtitle: 'Log in to contact support or view your tickets.',
-        ),
-      );
+          appBar: AppTopBar(title: a.supportTitle),
+          body: const AppShimmerCardList(itemHeight: 56));
     }
-
-    final ticketsAsync = ref.watch(ownTicketsProvider(user.id));
+    final async = ref.watch(ownTicketsProvider(user.id));
+    final hasTickets = (async.valueOrNull ?? const []).isNotEmpty;
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text('Help & Support'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.pop(),
-        ),
-      ),
-      floatingActionButton: FloatingActionButton.extended(
-        onPressed: () => _showNewTicketSheet(context, ref, user.id),
-        backgroundColor: AppColors.primary,
-        icon: const Icon(Icons.add_rounded, color: Colors.white),
-        label: const Text('New Ticket', style: TextStyle(color: Colors.white)),
-      ),
-      body: ticketsAsync.when(
-        loading: () => const AppLoader.fullscreen(),
-        error: (_, __) => AppErrorState(
-          message: 'Could not load your tickets',
-          onRetry: () => ref.invalidate(ownTicketsProvider(user.id)),
-        ),
+      appBar: AppTopBar(title: a.supportTitle, subtitle: a.supportSubtitle),
+      body: async.when(
+        skipLoadingOnReload: true,
+        loading: () => const AppShimmerCardList(count: 4, itemHeight: 56),
+        error: (e, _) => AppErrorState(
+            error: e,
+            onRetry: () => ref.invalidate(ownTicketsProvider(user.id))),
         data: (tickets) {
           if (tickets.isEmpty) {
-            return const AppEmptyState(
+            return AppEmptyState(
               icon: Icons.support_agent_rounded,
-              title: 'No support tickets yet',
-              subtitle: 'Having an issue with an order or your account? Tap "New Ticket" below.',
+              title: a.noTicketsTitle,
+              subtitle: a.noTicketsBody,
+              action: AppButton(
+                label: a.newRequest,
+                leadingIcon: Icons.edit_note_rounded,
+                expand: false,
+                onPressed: () => showNewTicketSheet(context, user.id),
+              ),
             );
           }
-          return ListView.separated(
-            padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
-            itemCount: tickets.length,
-            separatorBuilder: (_, __) => const SizedBox(height: AppSpacing.sm),
-            itemBuilder: (_, i) {
-              final t = tickets[i];
-              return GlassCard(
-                padding: const EdgeInsets.all(AppSpacing.md),
-                borderRadius: AppSpacing.radiusLg,
-                onTap: () => context.push('${RouteNames.support}/${t.id}'),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Expanded(
-                          child: Text(t.subject,
-                              style: AppTypography.labelLarge,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis),
-                        ),
-                        _StatusChip(status: t.status),
-                      ],
-                    ),
-                    const SizedBox(height: AppSpacing.xs),
-                    Text(t.message,
-                        style: AppTypography.bodyMedium,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis),
-                  ],
+          return RefreshIndicator(
+            onRefresh: () => ref.refresh(ownTicketsProvider(user.id).future),
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 720),
+                child: ListView.separated(
+                  physics: const AlwaysScrollableScrollPhysics(),
+                  padding: const EdgeInsets.fromLTRB(
+                    AppSpacing.screenHorizontal,
+                    AppSpacing.lg,
+                    AppSpacing.screenHorizontal,
+                    AppSpacing.xxl,
+                  ),
+                  itemCount: tickets.length + 1,
+                  separatorBuilder: (_, i) =>
+                      SizedBox(height: i == 0 ? AppSpacing.sm : AppSpacing.md),
+                  itemBuilder: (_, i) {
+                    if (i == 0) {
+                      return Text(a.yourRequests.toUpperCase(),
+                          style: context.text.overline
+                              .copyWith(letterSpacing: 0.8));
+                    }
+                    final t = tickets[i - 1];
+                    return _TicketCard(
+                      ticket: t,
+                      onTap: () =>
+                          context.pushOnce('${RouteNames.support}/${t.id}'),
+                    );
+                  },
                 ),
-              );
-            },
+              ),
+            ),
           );
         },
       ),
-    );
-  }
-
-  void _showNewTicketSheet(BuildContext context, WidgetRef ref, String userId) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      builder: (_) => _NewTicketSheet(userId: userId),
+      bottomNavigationBar: hasTickets
+          ? AccountBottomBar(
+              child: AppButton(
+                label: a.newRequest,
+                leadingIcon: Icons.edit_note_rounded,
+                onPressed: () => showNewTicketSheet(context, user.id),
+              ),
+            )
+          : null,
     );
   }
 }
 
-class _StatusChip extends StatelessWidget {
-  final TicketStatus status;
-  const _StatusChip({required this.status});
+class _TicketCard extends StatelessWidget {
+  const _TicketCard({required this.ticket, required this.onTap});
 
-  Color get _color {
-    switch (status) {
-      case TicketStatus.open:
-        return AppColors.warning;
-      case TicketStatus.inProgress:
-        return AppColors.info;
-      case TicketStatus.resolved:
-      case TicketStatus.closed:
-        return AppColors.success;
-    }
-  }
+  final TicketModel ticket;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm, vertical: 3),
-      decoration: BoxDecoration(
-        color: _color.withValues(alpha: 0.12),
-        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-      ),
-      child: Text(status.label, style: AppTypography.labelSmall.copyWith(color: _color)),
-    );
-  }
-}
-
-class _NewTicketSheet extends ConsumerStatefulWidget {
-  final String userId;
-  const _NewTicketSheet({required this.userId});
-
-  @override
-  ConsumerState<_NewTicketSheet> createState() => _NewTicketSheetState();
-}
-
-class _NewTicketSheetState extends ConsumerState<_NewTicketSheet> {
-  final _formKey = GlobalKey<FormState>();
-  final _subjectController = TextEditingController();
-  final _messageController = TextEditingController();
-  bool _isSubmitting = false;
-
-  @override
-  void dispose() {
-    _subjectController.dispose();
-    _messageController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _submit() async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _isSubmitting = true);
-    final ok = await ref.read(supportActionsProvider.notifier).createTicket(
-          customerId: widget.userId,
-          subject: _subjectController.text.trim(),
-          message: _messageController.text.trim(),
-        );
-    if (!mounted) return;
-    setState(() => _isSubmitting = false);
-    if (ok) {
-      ref.invalidate(ownTicketsProvider(widget.userId));
-      Navigator.of(context).pop();
-      AppSnackbar.success(context, 'Ticket submitted. We\'ll get back to you soon.');
-    } else {
-      AppSnackbar.error(context, 'Could not submit ticket. Please try again.');
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: EdgeInsets.only(bottom: MediaQuery.of(context).viewInsets.bottom),
-      child: Container(
-        decoration: BoxDecoration(
-          color: Theme.of(context).scaffoldBackgroundColor,
-          borderRadius: const BorderRadius.vertical(top: Radius.circular(AppSpacing.radiusXl)),
-        ),
-        padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Form(
-          key: _formKey,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text('New Support Ticket', style: AppTypography.headingMedium),
-              const SizedBox(height: AppSpacing.lg),
-              AppTextField(
-                label: 'Subject',
-                hint: 'What do you need help with?',
-                controller: _subjectController,
-                validator: (v) => v == null || v.isEmpty ? 'Subject is required' : null,
-              ),
-              const SizedBox(height: AppSpacing.md),
-              AppTextField(
-                label: 'Message',
-                hint: 'Describe the issue in detail',
-                controller: _messageController,
-                maxLines: 4,
-                validator: (v) => v == null || v.isEmpty ? 'Message is required' : null,
-              ),
-              const SizedBox(height: AppSpacing.lg),
-              AppButton(label: 'Submit', isLoading: _isSubmitting, onPressed: _submit),
-              const SizedBox(height: AppSpacing.sm),
-            ],
+    final p = context.palette;
+    final a = context.s.account;
+    final finished = ticketIsFinished(ticket.status);
+    return AppCard(
+      onTap: onTap,
+      padding: const EdgeInsets.fromLTRB(
+          AppSpacing.lg, AppSpacing.md, AppSpacing.sm, AppSpacing.md),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  ticket.subject,
+                  style: finished
+                      ? context.text.label.copyWith(color: p.textSecondary)
+                      : context.text.label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: AppSpacing.xxs),
+                Text(ticket.message,
+                    style: context.text.caption,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis),
+                const SizedBox(height: AppSpacing.sm),
+                Wrap(
+                  spacing: AppSpacing.sm,
+                  runSpacing: AppSpacing.xs,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    TicketStatusChip(status: ticket.status),
+                    Text(
+                        a.updated(
+                            AppFormat.timeAgo(context, ticket.lastActivity)),
+                        style: context.text.hint),
+                  ],
+                ),
+              ],
+            ),
           ),
-        ),
+          Icon(Icons.chevron_right_rounded, color: p.textHint),
+        ],
       ),
     );
   }

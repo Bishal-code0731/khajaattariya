@@ -2,8 +2,9 @@ class PaymentModel {
   final String id;
   final String orderId;
   final String customerId;
-  final String method; // 'khalti' | 'stripe' | 'cash'
-  final String status; // 'pending' | 'completed' | 'failed' | 'refunded'
+  final String method; // 'cash' | 'khalti' | 'esewa'
+  final String
+      status; // 'pending' | 'completed' | 'failed' | 'expired' | 'refunded'
   final double amount;
   final String currency;
   final String? gatewayRef;

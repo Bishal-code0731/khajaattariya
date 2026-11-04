@@ -1,21 +1,19 @@
-import 'package:riverpod/riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../../../core/utils/app_logger.dart';
 import '../../../main.dart';
 import '../domain/models/ticket_model.dart';
 import '../domain/models/ticket_reply_model.dart';
 
 part 'support_provider.g.dart';
 
-/// A customer/restaurant/rider's own tickets (support_tickets has no
-/// realtime publication, so this is a plain future — screens invalidate
-/// it after creating a ticket).
 @Riverpod(keepAlive: true)
 Future<List<TicketModel>> ownTickets(Ref ref, String userId) async {
   final data = await supabase
       .from('support_tickets')
       .select()
       .eq('customer_id', userId)
-      .order('created_at', ascending: false);
+      .order('updated_at', ascending: false);
   return (data as List)
       .map((m) => TicketModel.fromMap(m as Map<String, dynamic>))
       .toList();
@@ -68,6 +66,7 @@ class SupportActions extends _$SupportActions {
       state = const AsyncValue.data(null);
       return true;
     } catch (e, st) {
+      AppLogger.warning('support', 'action failed: $e');
       state = AsyncValue.error(e, st);
       return false;
     }
@@ -88,6 +87,7 @@ class SupportActions extends _$SupportActions {
       state = const AsyncValue.data(null);
       return true;
     } catch (e, st) {
+      AppLogger.warning('support', 'action failed: $e');
       state = AsyncValue.error(e, st);
       return false;
     }
@@ -104,6 +104,7 @@ class SupportActions extends _$SupportActions {
       state = const AsyncValue.data(null);
       return true;
     } catch (e, st) {
+      AppLogger.warning('support', 'action failed: $e');
       state = AsyncValue.error(e, st);
       return false;
     }

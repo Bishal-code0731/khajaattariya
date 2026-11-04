@@ -3,9 +3,9 @@ import '../models/food_item_model.dart';
 import '../models/restaurant_model.dart';
 
 abstract class RestaurantRepository {
-  /// Paginated — [page] is 0-indexed. Returns at most [pageSize] rows so
-  /// the home screen never pulls the entire restaurants table at once.
-  Future<List<RestaurantModel>> getRestaurants({int page = 0, int pageSize = 20});
+  /// Paginated — [page] is 0-indexed.
+  Future<List<RestaurantModel>> getRestaurants(
+      {int page = 0, int pageSize = 20});
   Future<List<RestaurantModel>> getFeaturedRestaurants();
   Future<List<FoodItemModel>> getMenuItems(String restaurantId);
   Future<List<FoodItemModel>> getPopularItems();

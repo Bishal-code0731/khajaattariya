@@ -10,24 +10,18 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
   final _cache = MemoryCache.instance;
   final _disk = LocalStore.instance;
 
-  // Restaurant open/closed + featured/offer flags can change, so this
-  // list is cached only briefly — long enough to absorb repeat reads
-  // within the same session (re-entering Home, scroll rebuilds) without
-  // serving stale "closed" badges for minutes.
   static const _shortTtl = Duration(seconds: 60);
   static const _longTtl = Duration(minutes: 15);
 
-  // Disk cache keys — the offline-first providers in restaurant_provider.dart
-  // read these directly for the "show cached data instantly" step, while
-  // this repository writes to them as a side effect of every successful
-  // network fetch ("refresh silently in background").
   static const restaurantsFirstPageDiskKey = 'restaurants:page0';
   static const categoriesDiskKey = 'categories';
   static const popularItemsDiskKey = 'menu_items:popular';
-  static String menuItemsDiskKey(String restaurantId) => 'menu_items:$restaurantId';
+  static String menuItemsDiskKey(String restaurantId) =>
+      'menu_items:$restaurantId';
 
   @override
-  Future<List<RestaurantModel>> getRestaurants({int page = 0, int pageSize = 20}) {
+  Future<List<RestaurantModel>> getRestaurants(
+      {int page = 0, int pageSize = 20}) {
     return _cache.fetch('restaurants:$page:$pageSize', () async {
       final from = page * pageSize;
       final to = from + pageSize - 1;
@@ -40,8 +34,6 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
           .range(from, to);
 
       final rows = (data as List).cast<Map<String, dynamic>>();
-      // Only the first page is what a cold, offline start needs to show
-      // instantly — later pages are purely for infinite scroll.
       if (page == 0) await _disk.saveList(restaurantsFirstPageDiskKey, rows);
       return rows.map((map) => RestaurantModel.fromMap(map)).toList();
     }, ttl: _shortTtl);
@@ -66,10 +58,10 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
     return _cache.fetch('menu_items:$restaurantId', () async {
       final data = await supabase
           .from('menu_items')
-          .select('*, restaurants(name, rating, delivery_time_min)')
+          .select('*, restaurants(name, rating, delivery_time_min, is_open)')
           .eq('restaurant_id', restaurantId)
           .eq('is_available', true)
-          .order('sort_order');
+          .order('sort_order', ascending: true);
 
       final rows = (data as List).cast<Map<String, dynamic>>();
       await _disk.saveList(menuItemsDiskKey(restaurantId), rows);
@@ -83,9 +75,9 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
       // Gets top-rated items across all restaurants
       final data = await supabase
           .from('menu_items')
-          .select('*, restaurants(name, rating, delivery_time_min)')
+          .select('*, restaurants(name, rating, delivery_time_min, is_open)')
           .eq('is_available', true)
-          .order('sort_order')
+          .order('sort_order', ascending: true)
           .limit(10);
 
       final rows = (data as List).cast<Map<String, dynamic>>();
@@ -99,10 +91,10 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
     return _cache.fetch('menu_items:category:$categoryId', () async {
       final data = await supabase
           .from('menu_items')
-          .select('*, restaurants(name, rating, delivery_time_min)')
+          .select('*, restaurants(name, rating, delivery_time_min, is_open)')
           .eq('category_id', categoryId)
           .eq('is_available', true)
-          .order('sort_order');
+          .order('sort_order', ascending: true);
 
       final rows = (data as List).cast<Map<String, dynamic>>();
       return rows.map((map) => FoodItemModel.fromMap(map)).toList();
@@ -117,7 +109,7 @@ class RestaurantRepositoryImpl implements RestaurantRepository {
           .from('categories')
           .select()
           .eq('is_active', true)
-          .order('sort_order');
+          .order('sort_order', ascending: true);
 
       final rows = (data as List).cast<Map<String, dynamic>>();
       await _disk.saveList(categoriesDiskKey, rows);
