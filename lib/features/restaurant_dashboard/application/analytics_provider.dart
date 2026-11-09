@@ -22,9 +22,6 @@ class DailySales {
   }
 }
 
-/// Last 7 days of pre-aggregated sales for a restaurant, backed by the
-/// `daily_sales` table (populated by the `orders_daily_sales_trigger`
-/// DB trigger on delivery) instead of pulling every raw order client-side.
 final restaurantDailySalesProvider =
     FutureProvider.family<List<DailySales>, String>((ref, restaurantId) async {
   final since = DateTime.now().subtract(const Duration(days: 6));
@@ -39,8 +36,6 @@ final restaurantDailySalesProvider =
       .toList();
 });
 
-/// Same `daily_sales` table but the last 30 days, used for the monthly
-/// revenue trend / totals on the Analytics tab.
 final restaurantMonthlySalesProvider =
     FutureProvider.family<List<DailySales>, String>((ref, restaurantId) async {
   final since = DateTime.now().subtract(const Duration(days: 29));
@@ -55,11 +50,71 @@ final restaurantMonthlySalesProvider =
       .toList();
 });
 
+class SalesKpis {
+  const SalesKpis({
+    required this.todayRevenue,
+    required this.todayOrders,
+    required this.weekRevenue,
+    required this.weekOrders,
+    required this.monthRevenue,
+    required this.monthOrders,
+  });
+
+  final double todayRevenue;
+  final int todayOrders;
+  final double weekRevenue;
+  final int weekOrders;
+  final double monthRevenue;
+  final int monthOrders;
+
+  /// Average delivered-order value over 30 days (0 when no orders).
+  double get averageOrderValue =>
+      monthOrders == 0 ? 0 : monthRevenue / monthOrders;
+
+  factory SalesKpis.fromDaily(List<DailySales> monthly, {DateTime? now}) {
+    final today = now ?? DateTime.now();
+    final startOfToday = DateTime(today.year, today.month, today.day);
+    final startOfWeek = startOfToday.subtract(const Duration(days: 6));
+    var tRev = 0.0, wRev = 0.0, mRev = 0.0;
+    var tOrd = 0, wOrd = 0, mOrd = 0;
+    for (final d in monthly) {
+      final day = DateTime(d.date.year, d.date.month, d.date.day);
+      mRev += d.totalRevenue;
+      mOrd += d.totalOrders;
+      if (!day.isBefore(startOfWeek)) {
+        wRev += d.totalRevenue;
+        wOrd += d.totalOrders;
+      }
+      if (day == startOfToday) {
+        tRev += d.totalRevenue;
+        tOrd += d.totalOrders;
+      }
+    }
+    return SalesKpis(
+      todayRevenue: tRev,
+      todayOrders: tOrd,
+      weekRevenue: wRev,
+      weekOrders: wOrd,
+      monthRevenue: mRev,
+      monthOrders: mOrd,
+    );
+  }
+}
+
+/// Clears cached analytics so pull-to-refresh really reloads.
+void refreshRestaurantAnalytics(WidgetRef ref, String restaurantId) {
+  MemoryCache.instance.invalidate('analytics_summary:$restaurantId');
+  ref.invalidate(restaurantMonthlySalesProvider(restaurantId));
+  ref.invalidate(restaurantAnalyticsSummaryProvider(restaurantId));
+  ref.invalidate(restaurantDailySalesProvider(restaurantId));
+}
+
 class TopFoodItem {
   final String name;
   final int quantitySold;
   final double revenue;
-  const TopFoodItem({required this.name, required this.quantitySold, required this.revenue});
+  const TopFoodItem(
+      {required this.name, required this.quantitySold, required this.revenue});
 }
 
 class RestaurantAnalyticsSummary {
@@ -95,13 +150,11 @@ class RestaurantAnalyticsSummary {
   );
 }
 
-/// Everything the Analytics tab needs beyond the daily_sales trend:
-/// cancellation rate, top foods, peak order hours, and a rough customer
-/// repeat-rate — all derived from the last 30 days of orders/order_items
-/// in a handful of batched queries (not one row-by-row loop).
 final restaurantAnalyticsSummaryProvider =
-    FutureProvider.family<RestaurantAnalyticsSummary, String>((ref, restaurantId) async {
-  return MemoryCache.instance.fetch('analytics_summary:$restaurantId', () async {
+    FutureProvider.family<RestaurantAnalyticsSummary, String>(
+        (ref, restaurantId) async {
+  return MemoryCache.instance.fetch('analytics_summary:$restaurantId',
+      () async {
     final since = DateTime.now().subtract(const Duration(days: 30));
     final orders = await supabase
         .from('orders')
@@ -142,7 +195,7 @@ final restaurantAnalyticsSummaryProvider =
 
     final byFood = <String, TopFoodItem>{};
     for (final row in items.cast<Map<String, dynamic>>()) {
-      final name = row['name'] as String? ?? 'Unknown';
+      final name = row['name'] as String? ?? '-';
       final qty = (row['quantity'] as num?)?.toInt() ?? 0;
       final subtotal = (row['subtotal'] as num?)?.toDouble() ?? 0;
       final existing = byFood[name];

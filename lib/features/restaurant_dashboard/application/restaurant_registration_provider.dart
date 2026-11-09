@@ -8,10 +8,6 @@ class RestaurantRegistration extends _$RestaurantRegistration {
   @override
   AsyncValue<void> build() => const AsyncValue.data(null);
 
-  /// Creates the `restaurants` row for a signed-up restaurant-role owner
-  /// who doesn't have one yet — this is what was missing before, leaving
-  /// every new restaurant owner stuck on "No restaurant found" with no
-  /// way to actually create their restaurant.
   Future<bool> register({
     required String ownerId,
     required String name,
@@ -33,8 +29,6 @@ class RestaurantRegistration extends _$RestaurantRegistration {
         'image_url': imageUrl,
         'delivery_time_min': deliveryTimeMin,
         'delivery_fee': deliveryFee,
-        // is_approved defaults to false — an admin approves it from the
-        // Restaurants tab, same as the rider approval flow.
       });
       state = const AsyncValue.data(null);
       return true;

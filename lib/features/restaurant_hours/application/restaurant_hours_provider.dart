@@ -1,4 +1,4 @@
-import 'package:riverpod/riverpod.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:riverpod_annotation/riverpod_annotation.dart';
 import '../../../main.dart';
 import '../domain/models/restaurant_hours_model.dart';
@@ -6,15 +6,14 @@ import '../domain/models/restaurant_hours_model.dart';
 part 'restaurant_hours_provider.g.dart';
 
 @Riverpod(keepAlive: true)
-Future<List<RestaurantHoursModel>> restaurantHours(Ref ref, String restaurantId) async {
+Future<List<RestaurantHoursModel>> restaurantHours(
+    Ref ref, String restaurantId) async {
   final data = await supabase
       .from('restaurant_hours')
       .select()
       .eq('restaurant_id', restaurantId)
-      .order('weekday');
-  return (data as List)
-      .map((m) => RestaurantHoursModel.fromMap(m))
-      .toList();
+      .order('weekday', ascending: true);
+  return (data as List).map((m) => RestaurantHoursModel.fromMap(m)).toList();
 }
 
 @Riverpod(keepAlive: true)
@@ -22,19 +21,13 @@ class RestaurantHoursNotifier extends _$RestaurantHoursNotifier {
   @override
   AsyncValue<void> build(String restaurantId) => const AsyncValue.data(null);
 
-  /// Upsert all 7 days in a single call — batching (instead of one
-  /// upsert per day in a loop) means a mid-save failure can't leave some
-  /// days updated and others not, silently reporting overall failure
-  /// while the DB is already in a mixed state.
-  Future<bool> saveHours(
-      List<RestaurantHoursModel> hours) async {
+  Future<bool> saveHours(List<RestaurantHoursModel> hours) async {
     state = const AsyncValue.loading();
     try {
       await supabase.from('restaurant_hours').upsert(
         [
           for (final h in hours)
             {
-              'id': h.id.isEmpty ? null : h.id,
               'restaurant_id': restaurantId,
               'weekday': h.weekday,
               'is_open': h.isOpen,
@@ -64,7 +57,7 @@ Future<void> initRestaurantHours(String restaurantId) async {
 
   final rows = List.generate(
     7,
-        (i) => {
+    (i) => {
       'restaurant_id': restaurantId,
       'weekday': i + 1,
       'is_open': true,

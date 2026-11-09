@@ -25,16 +25,22 @@ class RiderOnlineNotifier extends _$RiderOnlineNotifier {
   Future<void> loadStatus(String riderId) async {
     try {
       final data = await supabase
-          .from('riders').select('is_online').eq('id', riderId).maybeSingle();
+          .from('riders')
+          .select('is_online')
+          .eq('id', riderId)
+          .maybeSingle();
       state = AsyncValue.data(data?['is_online'] as bool? ?? false);
     } catch (e, st) {
       state = AsyncValue.error(e, st);
     }
   }
 
-  Future<void> toggle(String riderId) async {
+  /// Flips online/offline.
+  Future<Object?> toggle(String riderId) async {
+    if (state.isLoading) return null;
     final current = state.valueOrNull ?? false;
-    state = const AsyncValue.loading();
+    state = const AsyncValue<bool>.loading()
+        .copyWithPrevious(AsyncValue.data(current));
     try {
       final updated = await supabase
           .from('riders')
@@ -45,8 +51,10 @@ class RiderOnlineNotifier extends _$RiderOnlineNotifier {
         throw Exception('Could not update your status. Please try again.');
       }
       state = AsyncValue.data(!current);
-    } catch (e, st) {
-      state = AsyncValue.error(e, st);
+      return null;
+    } catch (e) {
+      state = AsyncValue.data(current);
+      return e;
     }
   }
 }
@@ -54,7 +62,9 @@ class RiderOnlineNotifier extends _$RiderOnlineNotifier {
 @Riverpod(keepAlive: true)
 Future<List<RiderEarningModel>> riderEarnings(Ref ref, String riderId) async {
   final data = await supabase
-      .from('rider_earnings').select().eq('rider_id', riderId)
+      .from('rider_earnings')
+      .select()
+      .eq('rider_id', riderId)
       .order('created_at', ascending: false);
   return (data as List)
       .map((m) => RiderEarningModel.fromMap(m as Map<String, dynamic>))
@@ -62,19 +72,24 @@ Future<List<RiderEarningModel>> riderEarnings(Ref ref, String riderId) async {
 }
 
 @Riverpod(keepAlive: true)
-Future<Map<String, double>> riderEarningsSummary(Ref ref, String riderId) async {
+Future<Map<String, double>> riderEarningsSummary(
+    Ref ref, String riderId) async {
   final data = await supabase
-      .from('riders').select('total_deliveries, total_earnings').eq('id', riderId).single();
+      .from('riders')
+      .select('total_deliveries, total_earnings')
+      .eq('id', riderId)
+      .maybeSingle();
   return {
-    'total_deliveries': (data['total_deliveries'] as num).toDouble(),
-    'total_earnings': (data['total_earnings'] as num).toDouble(),
+    'total_deliveries': (data?['total_deliveries'] as num?)?.toDouble() ?? 0,
+    'total_earnings': (data?['total_earnings'] as num?)?.toDouble() ?? 0,
   };
 }
 
 @Riverpod(keepAlive: true)
 Future<List<RiderModel>> allRiders(Ref ref) async {
   final data = await supabase
-      .from('riders').select('*, profiles(full_name, phone)')
+      .from('riders')
+      .select('*, profiles(full_name, phone)')
       .order('created_at', ascending: false);
   return (data as List)
       .map((m) => RiderModel.fromMap(m as Map<String, dynamic>))
@@ -89,7 +104,8 @@ class RiderApprovalNotifier extends _$RiderApprovalNotifier {
   Future<bool> approveRider(String riderId) async {
     state = const AsyncValue.loading();
     try {
-      final updated = await supabase.from('riders')
+      final updated = await supabase
+          .from('riders')
           .update({'is_approved': true, 'approval_note': null})
           .eq('id', riderId)
           .select('id');
@@ -98,13 +114,17 @@ class RiderApprovalNotifier extends _$RiderApprovalNotifier {
       }
       state = const AsyncValue.data(null);
       return true;
-    } catch (e, st) { state = AsyncValue.error(e, st); return false; }
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+      return false;
+    }
   }
 
   Future<bool> rejectRider(String riderId, String note) async {
     state = const AsyncValue.loading();
     try {
-      final updated = await supabase.from('riders')
+      final updated = await supabase
+          .from('riders')
           .update({'is_approved': false, 'approval_note': note})
           .eq('id', riderId)
           .select('id');
@@ -113,7 +133,10 @@ class RiderApprovalNotifier extends _$RiderApprovalNotifier {
       }
       state = const AsyncValue.data(null);
       return true;
-    } catch (e, st) { state = AsyncValue.error(e, st); return false; }
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+      return false;
+    }
   }
 }
 
@@ -130,11 +153,17 @@ class RiderRegistration extends _$RiderRegistration {
     state = const AsyncValue.loading();
     try {
       await supabase.from('riders').upsert({
-        'id': riderId, 'vehicle_type': vehicleType,
-        'vehicle_number': vehicleNumber, 'is_online': false, 'is_approved': false,
+        'id': riderId,
+        'vehicle_type': vehicleType,
+        'vehicle_number': vehicleNumber,
+        'is_online': false,
+        'is_approved': false,
       });
       state = const AsyncValue.data(null);
       return true;
-    } catch (e, st) { state = AsyncValue.error(e, st); return false; }
+    } catch (e, st) {
+      state = AsyncValue.error(e, st);
+      return false;
+    }
   }
 }
