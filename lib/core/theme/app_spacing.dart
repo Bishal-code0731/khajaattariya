@@ -1,67 +1,54 @@
-// Every spacing value in Khaja Attariya comes from here.
-// Based on a 4px base unit — all values are multiples of 4.
-// Never write padding: EdgeInsets.all(13) or height: 47.
-// Always use AppSpacing values — they keep everything aligned.
+import 'package:flutter/material.dart';
 
+/// Spacing (4-pt grid), radii and layout constants.
 class AppSpacing {
+  AppSpacing._();
 
-  // ── Base Scale ────────────────────────────────────────
-  // From smallest to largest.
-  // xs  → tiny gaps between an icon and its label
-  // sm  → gaps inside small components like chips and tags
-  // md  → standard padding — the most used value
-  // lg  → section spacing — between groups of content
-  // xl  → large sections — hero areas, onboarding screens
-  // xxl → very large — splash screen, empty states
-  static const double xs  = 4.0;
-  static const double sm  = 8.0;
-  static const double md  = 16.0;
-  static const double lg  = 24.0;
-  static const double xl  = 32.0;
-  static const double xxl = 48.0;
+  static const double xxs = 2;
+  static const double xs = 4;
+  static const double sm = 8;
+  static const double md = 12;
+  static const double lg = 16;
+  static const double xl = 24;
+  static const double xxl = 32;
+  static const double xxxl = 48;
 
-  // ── Screen Layout ─────────────────────────────────────
-  // The horizontal padding on every screen's left and right edge.
-  // Every screen uses this — it keeps content aligned across the app.
-  static const double screenHorizontal = 16.0;
+  static const double screenHorizontal = 16;
+  static const double maxContentWidth = 1200; // dashboards on web
+  static const double maxFormWidth = 480; // auth / forms on wide screens
+  static const double minTouchTarget = 48;
 
-  // ── Components ────────────────────────────────────────
-  // Fixed sizes for common components.
-  // All primary buttons are the same height — 52px.
-  // All text fields are the same height — 52px.
-  // This makes the app feel consistent and professional.
-  static const double buttonHeight     = 52.0;
-  static const double inputHeight      = 52.0;
-  static const double appBarHeight     = 56.0;
-  static const double bottomNavHeight  = 64.0;
-  static const double cardPadding      = 16.0;
+  static const double radiusXs = 6;
+  static const double radiusSm = 8;
+  static const double radiusMd = 12;
+  static const double radiusLg = 16;
+  static const double radiusXl = 24;
+  static const double radiusFull = 999;
 
-  // ── Border Radius ─────────────────────────────────────
-  // How rounded the corners are.
-  // sm  → small elements like tags and chips
-  // md  → buttons, text fields, most cards
-  // lg  → bigger cards, bottom sheets
-  // xl  → large image cards, restaurant covers
-  // full → completely round — avatar circles, icon buttons
-  static const double radiusSm   = 8.0;
-  static const double radiusMd   = 12.0;
-  static const double radiusLg   = 16.0;
-  static const double radiusXl   = 24.0;
-  static const double radiusFull = 999.0; // Use for circles
+  // Fixed media sizes
+  static const double menuItemImageSize = 96;
+  static const double restaurantCardImageAspect = 16 / 9;
+  static const double categoryIconSize = 64;
+  static const double restaurantCardHeight = 200; // legacy
+}
 
-  // ── Icon Sizes ────────────────────────────────────────
-  static const double iconSm  = 16.0; // Small inline icons
-  static const double iconMd  = 24.0; // Standard icons
-  static const double iconLg  = 32.0; // Large feature icons
+/// Soft, low shadows (light mode only — dark mode separates with borders).
+class AppShadows {
+  AppShadows._();
 
-  // ── Avatar Sizes ──────────────────────────────────────
-  static const double avatarSm  = 32.0;  // In lists, comments
-  static const double avatarMd  = 48.0;  // Profile headers
-  static const double avatarLg  = 80.0;  // Profile page
-  static const double avatarXl  = 120.0; // Onboarding, large profile
+  static List<BoxShadow> card(Color shadow) => [
+        BoxShadow(color: shadow, blurRadius: 16, offset: const Offset(0, 4)),
+      ];
 
-  // ── Restaurant Card ───────────────────────────────────
-  static const double restaurantCardHeight      = 200.0; // Full card
-  static const double restaurantImageHeight     = 140.0; // Image part of card
-  static const double menuItemImageSize         = 80.0;  // Food item thumbnail
+  static List<BoxShadow> raised(Color shadow) => [
+        BoxShadow(color: shadow, blurRadius: 24, offset: const Offset(0, 8)),
+      ];
+}
+
+/// Durations for restrained motion.
+class AppMotion {
+  AppMotion._();
+  static const Duration fast = Duration(milliseconds: 150);
+  static const Duration normal = Duration(milliseconds: 250);
+  static const Curve curve = Curves.easeOutCubic;
 }

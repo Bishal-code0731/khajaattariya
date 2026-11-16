@@ -1,13 +1,20 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+
+import '../../../core/l10n/s.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
-import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/app_typography.dart';
+import '../../../core/utils/validators.dart';
 import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/app_snackbar.dart';
 import '../../../shared/widgets/app_text_field.dart';
 import '../application/auth_provider.dart';
+import 'widgets/auth_header.dart';
+import 'widgets/auth_scaffold.dart';
+import 'widgets/auth_status_panel.dart';
+import '../../../shared/widgets/busy_overlay.dart';
 
 class ForgotPasswordScreen extends ConsumerStatefulWidget {
   const ForgotPasswordScreen({super.key});
@@ -20,8 +27,11 @@ class ForgotPasswordScreen extends ConsumerStatefulWidget {
 class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
   final _formKey = GlobalKey<FormState>();
   final _emailController = TextEditingController();
-  bool _emailSent = false;
   bool _isLoading = false;
+  bool _isResending = false;
+
+  /// The address the link went to; non-null shows the "sent" state.
+  String? _sentTo;
 
   @override
   void dispose() {
@@ -29,123 +39,104 @@ class _ForgotPasswordScreenState extends ConsumerState<ForgotPasswordScreen> {
     super.dispose();
   }
 
-  Future<void> _sendReset() async {
-    if (!_formKey.currentState!.validate()) return;
-
-    setState(() => _isLoading = true);
-
+  Future<bool> _send(String email) async {
     try {
-      await ref
-          .read(authNotifierProvider.notifier)
-          .sendPasswordReset(_emailController.text.trim());
-      if (mounted) setState(() => _emailSent = true);
+      await ref.read(authNotifierProvider.notifier).sendPasswordReset(email);
+      return true;
     } catch (e) {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text(e.toString()),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } finally {
-      if (mounted) setState(() => _isLoading = false);
+      if (mounted) AppSnackbar.error(context, e);
+      return false;
     }
   }
 
+  Future<void> _submit() async {
+    if (_isLoading) return;
+    if (!_formKey.currentState!.validate()) return;
+    FocusScope.of(context).unfocus();
+    setState(() => _isLoading = true);
+    final email = _emailController.text.trim();
+    final ok = await _send(email);
+    if (!mounted) return;
+    setState(() {
+      _isLoading = false;
+      if (ok) _sentTo = email;
+    });
+  }
+
+  Future<void> _resend() async {
+    final email = _sentTo;
+    if (email == null || _isResending) return;
+    setState(() => _isResending = true);
+    final ok = await _send(email);
+    if (!mounted) return;
+    setState(() => _isResending = false);
+    if (ok) AppSnackbar.success(context, context.s.auth.resendDone);
+  }
+
   @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      body: SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: AppSpacing.screenHorizontal,
-          ),
-          child: _emailSent ? _buildSuccess() : _buildForm(),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) =>
+      BusyOverlay(busy: _isLoading, child: _buildBusyContent(context));
 
-  Widget _buildForm() {
-    return Form(
-      key: _formKey,
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const SizedBox(height: AppSpacing.xl),
-          IconButton(
-            onPressed: () => context.go(RouteNames.login),
-            icon: const Icon(Icons.arrow_back_rounded),
-            padding: EdgeInsets.zero,
-          ),
-          const SizedBox(height: AppSpacing.lg),
-          const Text('Forgot Password? 🔐', style: AppTypography.displayMedium),
-          const SizedBox(height: AppSpacing.sm),
-          Text(
-            'Enter your email and we\'ll send you a link to reset your password.',
-            style: AppTypography.bodyMedium,
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          AppTextField(
-            label: 'Email',
-            hint: 'you@example.com',
-            controller: _emailController,
-            keyboardType: TextInputType.emailAddress,
-            prefixIcon: Icons.email_outlined,
-            validator: (v) {
-              if (v == null || v.isEmpty) return 'Email is required';
-              if (!v.contains('@')) return 'Enter a valid email';
-              return null;
-            },
-          ),
-          const SizedBox(height: AppSpacing.xl),
-          AppButton(
-            label: 'Send Reset Link',
-            isLoading: _isLoading,
-            onPressed: _sendReset,
-          ),
-          const SizedBox(height: AppSpacing.md),
-          Center(
-            child: TextButton(
-              onPressed: () => context.go(RouteNames.login),
-              child: const Text('Back to Login'),
+  Widget _buildBusyContent(BuildContext context) {
+    final s = context.s;
+    final sentTo = _sentTo;
+
+    return AuthScaffold(
+      showBack: true,
+      onBack: () => context.safeBack(RouteNames.login),
+      child: sentTo != null
+          ? AuthStatusPanel(
+              icon: Icons.mark_email_read_outlined,
+              title: s.auth.resetSentTitle,
+              body: s.auth.resetSentBody(sentTo),
+              hint: s.auth.resetSentHint,
+              actions: [
+                AppButton(
+                    label: s.auth.backToLogin,
+                    onPressed: () => context.go(RouteNames.login)),
+                AppButton(
+                  label: s.auth.resendLink,
+                  variant: AppButtonVariant.outline,
+                  leadingIcon: Icons.refresh_rounded,
+                  isLoading: _isResending,
+                  onPressed: _resend,
+                ),
+              ],
+            )
+          : Form(
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AuthHeader(
+                      title: s.auth.forgotTitle,
+                      subtitle: s.auth.forgotSubtitle),
+                  AppTextField(
+                    label: s.common.fieldEmail,
+                    hint: s.auth.emailHint,
+                    controller: _emailController,
+                    keyboardType: TextInputType.emailAddress,
+                    textInputAction: TextInputAction.done,
+                    prefixIcon: Icons.mail_outline_rounded,
+                    autofillHints: const [AutofillHints.email],
+                    validator: context.validators.email,
+                    onSubmitted: (_) => _submit(),
+                  ),
+                  const SizedBox(height: AppSpacing.xl),
+                  AppButton(
+                    label: s.auth.sendResetLink,
+                    isLoading: _isLoading,
+                    onPressed: _submit,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppButton(
+                    label: s.auth.backToLogin,
+                    variant: AppButtonVariant.text,
+                    onPressed: () => context.go(RouteNames.login),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildSuccess() {
-    return Column(
-      mainAxisAlignment: MainAxisAlignment.center,
-      crossAxisAlignment: CrossAxisAlignment.center,
-      children: [
-        Container(
-          width: 80,
-          height: 80,
-          decoration: BoxDecoration(
-            color: AppColors.successLight,
-            shape: BoxShape.circle,
-          ),
-          child: const Icon(Icons.mark_email_read_rounded,
-              color: AppColors.success, size: 40),
-        ),
-        const SizedBox(height: AppSpacing.lg),
-        const Text('Check your email!', style: AppTypography.headingLarge),
-        const SizedBox(height: AppSpacing.sm),
-        Text(
-          'We sent a password reset link to\n${_emailController.text}',
-          style: AppTypography.bodyMedium,
-          textAlign: TextAlign.center,
-        ),
-        const SizedBox(height: AppSpacing.xl),
-        AppButton(
-          label: 'Back to Login',
-          onPressed: () => context.go(RouteNames.login),
-        ),
-      ],
     );
   }
 }

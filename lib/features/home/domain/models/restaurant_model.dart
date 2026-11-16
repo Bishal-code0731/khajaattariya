@@ -10,6 +10,8 @@ class RestaurantModel {
   final bool isOpen;
   final bool isFeatured;
   final String? offer;
+  final String? address;
+  final String? phone;
 
   const RestaurantModel({
     required this.id,
@@ -23,7 +25,11 @@ class RestaurantModel {
     required this.isOpen,
     this.isFeatured = false,
     this.offer,
+    this.address,
+    this.phone,
   });
+
+  bool get hasOffer => offer != null && offer!.trim().isNotEmpty;
 
   factory RestaurantModel.fromMap(Map<String, dynamic> map) {
     return RestaurantModel(
@@ -38,6 +44,8 @@ class RestaurantModel {
       isOpen: map['is_open'] as bool,
       isFeatured: map['is_featured'] as bool? ?? false,
       offer: map['offer'] as String?,
+      address: map['address'] as String?,
+      phone: map['phone'] as String?,
     );
   }
 }

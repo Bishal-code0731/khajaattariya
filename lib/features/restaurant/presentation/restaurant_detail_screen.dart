@@ -1,22 +1,40 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-
-import '../../../core/theme/app_colors.dart';
+import 'package:go_router/go_router.dart';
+import '../../../core/l10n/s.dart';
+import '../../../core/router/route_names.dart';
+import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/app_typography.dart';
-import '../../../shared/widgets/glass_card.dart';
+import '../../../core/theme/app_text_styles.dart';
+import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/app_snackbar.dart';
+import '../../../shared/widgets/app_top_bar.dart';
+import '../../../shared/widgets/empty_state_view.dart';
+import '../../../shared/widgets/error_state_view.dart';
+import '../../../shared/widgets/offline_banner.dart';
+import '../../../shared/widgets/shimmer_loader.dart';
+import '../../auth/application/auth_provider.dart';
 import '../../cart/application/cart_notifier.dart';
+import '../../cart/presentation/widgets/view_cart_bar.dart';
 import '../../home/application/restaurant_provider.dart';
 import '../../home/domain/models/food_item_model.dart';
 import '../../home/domain/models/restaurant_model.dart';
+import '../../home/presentation/widgets/favourite_button.dart';
+import '../../restaurant_hours/application/restaurant_hours_provider.dart';
+import '../../restaurant_hours/domain/models/restaurant_hours_model.dart';
+import '../application/menu_sections.dart';
+import 'widgets/menu_item_tile.dart';
+import 'widgets/menu_section_bar.dart';
+import 'widgets/restaurant_hero_app_bar.dart';
+import 'widgets/restaurant_info_header.dart';
+import 'widgets/restaurant_info_section.dart';
+import 'widgets/restaurant_reviews_section.dart';
 
 class RestaurantDetailScreen extends ConsumerStatefulWidget {
-  final String restaurantId;
+  const RestaurantDetailScreen({super.key, required this.restaurantId});
 
-  const RestaurantDetailScreen({
-    super.key,
-    required this.restaurantId,
-  });
+  final String restaurantId;
 
   @override
   ConsumerState<RestaurantDetailScreen> createState() =>
@@ -24,754 +42,338 @@ class RestaurantDetailScreen extends ConsumerStatefulWidget {
 }
 
 class _RestaurantDetailScreenState
-    extends ConsumerState<RestaurantDetailScreen>
-    with SingleTickerProviderStateMixin {
-  late TabController _tabController;
+    extends ConsumerState<RestaurantDetailScreen> {
+  static const _reviewsId = '_reviews';
+  static const _infoId = '_info';
+  static const _maxBodyWidth = 820.0;
 
-  final List<String> _tabs = [
-    'All',
-    'Veg',
-    'Non-Veg',
-    'Offers',
-  ];
+  final _scroll = ScrollController();
+  final _keys = <String, GlobalKey>{};
+  List<String> _targetOrder = const [];
+  bool _collapsed = false;
+  bool _vegOnly = false;
+  bool _jumping = false;
+  String? _activeId;
 
   @override
   void initState() {
     super.initState();
-
-    _tabController = TabController(
-      length: _tabs.length,
-      vsync: this,
-    );
-
-    _tabController.addListener(() => setState(() {}));
+    _scroll.addListener(_onScroll);
   }
 
   @override
   void dispose() {
-    _tabController.dispose();
+    _scroll.removeListener(_onScroll);
+    _scroll.dispose();
     super.dispose();
   }
 
-  void _onAddToCart(FoodItemModel item) {
-    final added =
-    ref.read(cartNotifierProvider.notifier).addItem(item);
+  double _heroHeight(BuildContext context) =>
+      MediaQuery.sizeOf(context).width >= 600 ? 280 : 220;
 
-    if (added) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('${item.name} added to cart'),
-          backgroundColor: AppColors.primary,
-          behavior: SnackBarBehavior.floating,
-          shape: RoundedRectangleBorder(
-            borderRadius:
-            BorderRadius.circular(AppSpacing.radiusMd),
-          ),
-          duration: const Duration(seconds: 1),
-        ),
-      );
-    } else {
-      _showRestaurantConflictDialog(item);
+  double _barExtent(BuildContext context) =>
+      40 +
+      16 * (MediaQuery.textScalerOf(context).scale(14) / 14) +
+      AppSpacing.sm;
+
+  double _pinnedExtent(BuildContext context) =>
+      kToolbarHeight + MediaQuery.paddingOf(context).top + _barExtent(context);
+
+  GlobalKey _keyFor(String id) => _keys.putIfAbsent(id, () => GlobalKey());
+
+  double? _offsetOf(String id) {
+    final ro = _keys[id]?.currentContext?.findRenderObject();
+    if (ro == null || !ro.attached) return null;
+    final viewport = RenderAbstractViewport.maybeOf(ro);
+    if (viewport == null) return null;
+    return viewport.getOffsetToReveal(ro, 0).offset;
+  }
+
+  void _onScroll() {
+    if (!_scroll.hasClients) return;
+    final collapsed = _scroll.offset >
+        _heroHeight(context) -
+            kToolbarHeight -
+            MediaQuery.paddingOf(context).top -
+            8;
+    String? active = _activeId;
+    if (!_jumping) {
+      final line = _scroll.offset + _pinnedExtent(context) + 1;
+      active = _targetOrder.isEmpty ? null : _targetOrder.first;
+      for (final id in _targetOrder) {
+        final o = _offsetOf(id);
+        if (o != null && o <= line) active = id;
+      }
+    }
+    if (collapsed != _collapsed || active != _activeId) {
+      setState(() {
+        _collapsed = collapsed;
+        _activeId = active;
+      });
     }
   }
 
-  void _showRestaurantConflictDialog(FoodItemModel item) {
-    final cartRestaurantName =
-        ref.read(cartNotifierProvider).restaurantName;
+  Future<void> _jumpTo(String id) async {
+    final o = _offsetOf(id);
+    if (o == null || !_scroll.hasClients) return;
+    setState(() {
+      _activeId = id;
+      _jumping = true;
+    });
+    final target = (o - _pinnedExtent(context))
+        .clamp(0.0, _scroll.position.maxScrollExtent);
+    await _scroll.animateTo(target,
+        duration: AppMotion.normal * 2, curve: AppMotion.curve);
+    if (mounted) setState(() => _jumping = false);
+  }
 
-    showDialog(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(
-          borderRadius:
-          BorderRadius.circular(AppSpacing.radiusLg),
-        ),
-        title: const Text('Start new order?'),
-        content: Text(
-          'You have items from $cartRestaurantName in your cart. '
-              'Each order can only be from one restaurant.\n\n'
-              'Clear your cart and start a new order from ${item.restaurantName}?',
-          style: AppTypography.bodyMedium,
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.of(ctx).pop(),
-            child: const Text('Keep current cart'),
+  void _add(RestaurantModel restaurant, FoodItemModel item) {
+    if (!restaurant.isOpen) {
+      AppSnackbar.warning(context, context.s.customer.restaurantClosedCantAdd);
+      return;
+    }
+    if (!item.isAvailable) return;
+    ref.read(cartNotifierProvider.notifier).addItem(item);
+  }
+
+  Widget _boxed(Widget child) => Align(
+        alignment: Alignment.topCenter,
+        child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: _maxBodyWidth),
+            child: child),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final s = context.s.customer;
+    final async = ref.watch(restaurantByIdProvider(widget.restaurantId));
+    final restaurant = async.valueOrNull;
+
+    if (restaurant == null) {
+      Widget body;
+      if (async.isLoading) {
+        body = const AppShimmerCardList(count: 5);
+      } else if (async.hasError) {
+        body = AppErrorState(
+          error: async.error,
+          onRetry: () =>
+              ref.invalidate(restaurantByIdProvider(widget.restaurantId)),
+        );
+      } else {
+        body = AppEmptyState(
+          icon: Icons.storefront_outlined,
+          title: s.restaurantNotFoundTitle,
+          subtitle: s.restaurantNotFoundBody,
+          action: AppButton(
+            label: s.backToHome,
+            expand: false,
+            onPressed: () => context.go(RouteNames.home),
           ),
-          ElevatedButton(
-            onPressed: () {
-              Navigator.of(ctx).pop();
+        );
+      }
+      return Scaffold(
+        appBar: const AppTopBar(title: ''),
+        body: Column(children: [const OfflineBanner(), Expanded(child: body)]),
+      );
+    }
+    return _buildPage(context, restaurant);
+  }
 
-              ref
+  Widget _buildPage(BuildContext context, RestaurantModel restaurant) {
+    final p = context.palette;
+    final s = context.s.customer;
+    final user = ref.watch(authStateProvider).valueOrNull;
+    final favIds = watchFavouriteIds(ref, user?.id);
+    final menuAsync = ref.watch(menuItemsProvider(restaurant.id));
+    final categories = ref.watch(categoriesProvider).valueOrNull ?? const [];
+    final hours = ref.watch(restaurantHoursProvider(restaurant.id)).valueOrNull;
+    final cart = ref.watch(cartNotifierProvider);
+
+    RestaurantHoursModel? today;
+    for (final h in hours ?? const <RestaurantHoursModel>[]) {
+      if (h.weekday == DateTime.now().weekday) today = h;
+    }
+
+    final items = menuAsync.valueOrNull;
+    var sections = items == null
+        ? const <MenuSection>[]
+        : buildMenuSections(
+            items,
+            categoryNames: {for (final c in categories) c.id: c.name},
+            moreTitle: s.menuMore,
+            vegOnly: _vegOnly,
+          );
+    if (sections.length == 1 &&
+        sections.first.id == MenuSection.uncategorisedId) {
+      sections = [
+        MenuSection(
+            id: sections.first.id,
+            title: s.menuAll,
+            items: sections.first.items)
+      ];
+    }
+
+    final targets = [
+      for (final sec in sections) MenuJumpTarget(id: sec.id, label: sec.title),
+      MenuJumpTarget(id: _reviewsId, label: s.reviewsTab),
+      MenuJumpTarget(id: _infoId, label: s.infoTab),
+    ];
+    _targetOrder = [for (final t in targets) t.id];
+    final activeId =
+        _targetOrder.contains(_activeId) ? _activeId : _targetOrder.first;
+
+    final menuSlivers = <Widget>[];
+    if (items == null && menuAsync.isLoading) {
+      menuSlivers.add(SliverToBoxAdapter(
+          child: _boxed(const AppShimmerCardList(count: 4, shrinkWrap: true))));
+    } else if (items == null) {
+      menuSlivers.add(SliverToBoxAdapter(
+        child: _boxed(AppErrorState(
+          message: s.menuLoadFailed,
+          onRetry: () =>
+              ref.read(menuItemsProvider(restaurant.id).notifier).refresh(),
+        )),
+      ));
+    } else if (items.isEmpty) {
+      menuSlivers.add(SliverToBoxAdapter(
+        child: _boxed(AppEmptyState(
+          compact: true,
+          icon: Icons.restaurant_menu_rounded,
+          title: s.menuEmptyTitle,
+          subtitle: s.menuEmptyBody,
+        )),
+      ));
+    } else if (sections.isEmpty) {
+      menuSlivers.add(SliverToBoxAdapter(
+        child: _boxed(Padding(
+          padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
+          child: Text(s.menuVegEmpty, style: context.text.secondary),
+        )),
+      ));
+    } else {
+      for (final sec in sections) {
+        menuSlivers.add(SliverToBoxAdapter(
+          key: _keyFor(sec.id),
+          child: _boxed(_MenuSectionView(
+            section: sec,
+            builder: (item) => MenuItemTile(
+              key: ValueKey(item.id),
+              item: item,
+              quantity: cart.quantityOf(restaurant.id, item.id),
+              canOrder: restaurant.isOpen,
+              onAdd: () => _add(restaurant, item),
+              onRemove: () => ref
                   .read(cartNotifierProvider.notifier)
-                  .clearCart();
-
-              ref
-                  .read(cartNotifierProvider.notifier)
-                  .addItem(item);
-
-              ScaffoldMessenger.of(context).showSnackBar(
-                SnackBar(
-                  content: Text('${item.name} added to cart'),
-                  backgroundColor: AppColors.primary,
-                  behavior: SnackBarBehavior.floating,
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(
-                      AppSpacing.radiusMd,
-                    ),
-                  ),
-                  duration: const Duration(seconds: 1),
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppColors.primary,
+                  .decrementQuantity(restaurant.id, item.id),
             ),
-            child: const Text(
-              'Start new order',
-              style: TextStyle(color: Colors.white),
+          )),
+        ));
+      }
+    }
+
+    return Scaffold(
+      backgroundColor: p.surface,
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(
+            child: CustomScrollView(
+              controller: _scroll,
+              slivers: [
+                RestaurantHeroAppBar(
+                  restaurant: restaurant,
+                  collapsed: _collapsed,
+                  expandedHeight: _heroHeight(context),
+                  userId: user?.id,
+                  isFavourite: favIds.contains(restaurant.id),
+                ),
+                SliverToBoxAdapter(
+                  child: _boxed(RestaurantInfoHeader(
+                    restaurant: restaurant,
+                    today: today,
+                    onRatingTap: () => _jumpTo(_reviewsId),
+                  )),
+                ),
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: MenuSectionBarDelegate(
+                    extent: _barExtent(context),
+                    background: p.surface,
+                    border: p.border,
+                    child: _boxed(MenuSectionBar(
+                      targets: targets,
+                      activeId: activeId,
+                      vegOnly: _vegOnly,
+                      onVegOnlyChanged: (v) => setState(() => _vegOnly = v),
+                      onJump: _jumpTo,
+                    )),
+                  ),
+                ),
+                ...menuSlivers,
+                SliverToBoxAdapter(
+                  key: _keyFor(_reviewsId),
+                  child: _boxed(Padding(
+                    padding: const EdgeInsets.only(top: AppSpacing.md),
+                    child: RestaurantReviewsSection(restaurant: restaurant),
+                  )),
+                ),
+                SliverToBoxAdapter(
+                  key: _keyFor(_infoId),
+                  child: _boxed(Padding(
+                    padding: const EdgeInsets.only(top: AppSpacing.md),
+                    child: RestaurantInfoSection(
+                        restaurant: restaurant, hours: hours),
+                  )),
+                ),
+                const SliverToBoxAdapter(
+                    child: SizedBox(height: AppSpacing.xxxl)),
+              ],
             ),
           ),
         ],
       ),
-    );
-  }
-
-  Widget _buildMenuTab(
-      bool? isVeg, {
-        bool offersOnly = false,
-      }) {
-    final menuAsync =
-    ref.watch(menuItemsProvider(widget.restaurantId));
-
-    return menuAsync.when(
-      loading: () => const Center(
-        child: CircularProgressIndicator(
-          color: AppColors.primary,
-          strokeWidth: 2,
-        ),
-      ),
-      error: (_, __) => Center(
-        child: Text(
-          'Could not load menu',
-          style: TextStyle(
-            color: AppColors.textSecondary,
-          ),
-        ),
-      ),
-      data: (items) {
-        var filtered = items;
-
-        if (isVeg != null) {
-          filtered = filtered
-              .where((i) => i.isVeg == isVeg)
-              .toList();
-        }
-
-        if (offersOnly) {
-          filtered = filtered
-              .where((i) => i.offer != null)
-              .toList();
-        }
-
-        return _MenuList(
-          items: filtered,
-          onAddToCart: _onAddToCart,
-        );
-      },
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final restaurantAsync = ref.watch(
-      restaurantByIdProvider(widget.restaurantId),
-    );
-
-    final isDark =
-        Theme.of(context).brightness == Brightness.dark;
-
-    return restaurantAsync.when(
-      loading: () => const Scaffold(
-        body: Center(
-          child: CircularProgressIndicator(
-            color: AppColors.primary,
-          ),
-        ),
-      ),
-
-      error: (_, __) => const Scaffold(
-        body: Center(
-          child: Text('Restaurant not found'),
-        ),
-      ),
-
-      data: (restaurant) {
-        if (restaurant == null) {
-          return const Scaffold(
-            body: Center(
-              child: Text('Restaurant not found'),
-            ),
-          );
-        }
-
-        return Scaffold(
-          backgroundColor:
-          Theme.of(context).scaffoldBackgroundColor,
-          body: NestedScrollView(
-            headerSliverBuilder: (context, _) => [
-              _buildSliverAppBar(
-                context,
-                restaurant,
-              ),
-              SliverPersistentHeader(
-                pinned: true,
-                delegate: _TabBarDelegate(
-                  tabController: _tabController,
-                  tabs: _tabs,
-                  isDark: isDark,
-                ),
-              ),
-            ],
-            body: TabBarView(
-              controller: _tabController,
-              children: [
-                _buildMenuTab(null),
-                _buildMenuTab(true),
-                _buildMenuTab(false),
-                _buildMenuTab(
-                  null,
-                  offersOnly: true,
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  SliverAppBar _buildSliverAppBar(
-      BuildContext context,
-      RestaurantModel restaurant,
-      ) {
-    return SliverAppBar(
-      expandedHeight: 240,
-      pinned: true,
-      backgroundColor:
-      Theme.of(context).scaffoldBackgroundColor,
-      leading: Padding(
-        padding: const EdgeInsets.all(8),
-        child: CircleAvatar(
-          backgroundColor: Colors.black45,
-          child: IconButton(
-            icon: const Icon(
-              Icons.arrow_back_rounded,
-              color: Colors.white,
-              size: 20,
-            ),
-            onPressed: () => Navigator.of(context).pop(),
-          ),
-        ),
-      ),
-      flexibleSpace: FlexibleSpaceBar(
-        background: Stack(
-          fit: StackFit.expand,
-          children: [
-            Image.network(
-              restaurant.imageUrl,
-              fit: BoxFit.cover,
-              errorBuilder: (_, __, ___) => Container(
-                color: AppColors.border,
-                child: const Icon(
-                  Icons.restaurant_rounded,
-                  color: AppColors.textHint,
-                  size: 48,
-                ),
-              ),
-            ),
-            const DecoratedBox(
-              decoration: BoxDecoration(
-                gradient: LinearGradient(
-                  begin: Alignment.topCenter,
-                  end: Alignment.bottomCenter,
-                  colors: [
-                    Colors.transparent,
-                    Colors.black54,
-                  ],
-                ),
-              ),
-            ),
-            if (!restaurant.isOpen)
-              Container(
-                color: Colors.black54,
-                child: const Center(
-                  child: Text(
-                    'CLOSED',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 4,
-                    ),
-                  ),
-                ),
-              ),
-          ],
-        ),
-      ),
-      bottom: PreferredSize(
-        preferredSize: const Size.fromHeight(80),
-        child: _RestaurantInfoBar(
-          restaurant: restaurant,
-        ),
-      ),
+      bottomNavigationBar: const ViewCartBar(),
     );
   }
 }
 
-class _RestaurantInfoBar extends StatelessWidget {
-  final RestaurantModel restaurant;
+class _MenuSectionView extends StatelessWidget {
+  const _MenuSectionView({required this.section, required this.builder});
 
-  const _RestaurantInfoBar({
-    required this.restaurant,
-  });
+  final MenuSection section;
+  final Widget Function(FoodItemModel) builder;
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.screenHorizontal,
-        AppSpacing.sm,
-        AppSpacing.screenHorizontal,
-        AppSpacing.md,
-      ),
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: const BorderRadius.only(
-          topLeft: Radius.circular(20),
-          topRight: Radius.circular(20),
-        ),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
+    final p = context.palette;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.screenHorizontal,
+              AppSpacing.xl, AppSpacing.screenHorizontal, 0),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
               Expanded(
-                child: Text(
-                  restaurant.name,
-                  style: AppTypography.headingLarge,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              if (restaurant.offer != null)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: AppSpacing.sm,
-                    vertical: AppSpacing.xs,
-                  ),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius: BorderRadius.circular(
-                      AppSpacing.radiusSm,
-                    ),
-                  ),
-                  child: Text(
-                    restaurant.offer!,
-                    style:
-                    AppTypography.labelSmall.copyWith(
-                      color: AppColors.white,
-                    ),
-                  ),
-                ),
+                  child: Semantics(
+                      header: true,
+                      child: Text(section.title, style: context.text.h2))),
+              Text('${section.items.length}', style: context.text.hint),
             ],
           ),
-          const SizedBox(height: 4),
-          Text(
-            restaurant.cuisineType,
-            style: AppTypography.bodySmall,
-          ),
-          const SizedBox(height: AppSpacing.sm),
-          Row(
-            children: [
-              _InfoChip(
-                icon: Icons.star_rounded,
-                iconColor: AppColors.accent,
-                label:
-                '${restaurant.rating} (${restaurant.reviewCount} reviews)',
-              ),
-              const SizedBox(width: AppSpacing.md),
-              _InfoChip(
-                icon: Icons.access_time_rounded,
-                iconColor: AppColors.primary,
-                label:
-                '${restaurant.deliveryTimeMin} min',
-              ),
-              const SizedBox(width: AppSpacing.md),
-              _InfoChip(
-                icon: Icons.delivery_dining_rounded,
-                iconColor: AppColors.textSecondary,
-                label: restaurant.deliveryFee == 0
-                    ? 'Free delivery'
-                    : 'Rs. ${restaurant.deliveryFee.toInt()}',
-              ),
-            ],
-          ),
+        ),
+        for (var i = 0; i < section.items.length; i++) ...[
+          if (i > 0)
+            Divider(
+              height: 1,
+              indent: AppSpacing.screenHorizontal,
+              endIndent: AppSpacing.screenHorizontal,
+              color: p.border,
+            ),
+          builder(section.items[i]),
         ],
-      ),
-    );
-  }
-}
-
-class _InfoChip extends StatelessWidget {
-  final IconData icon;
-  final Color iconColor;
-  final String label;
-
-  const _InfoChip({
-    required this.icon,
-    required this.iconColor,
-    required this.label,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Icon(
-          icon,
-          size: 14,
-          color: iconColor,
-        ),
-        const SizedBox(width: 3),
-        Text(
-          label,
-          style: AppTypography.bodySmall,
-        ),
       ],
-    );
-  }
-}
-
-class _TabBarDelegate
-    extends SliverPersistentHeaderDelegate {
-  final TabController tabController;
-  final List<String> tabs;
-  final bool isDark;
-
-  _TabBarDelegate({
-    required this.tabController,
-    required this.tabs,
-    required this.isDark,
-  });
-
-  @override
-  double get minExtent => 48;
-
-  @override
-  double get maxExtent => 48;
-
-  @override
-  Widget build(
-      BuildContext context,
-      double shrinkOffset,
-      bool overlapsContent,
-      ) {
-    return Container(
-      color: Theme.of(context).scaffoldBackgroundColor,
-      child: TabBar(
-        controller: tabController,
-        isScrollable: true,
-        tabAlignment: TabAlignment.start,
-        labelColor: AppColors.primary,
-        unselectedLabelColor:
-        AppColors.textSecondary,
-        labelStyle: AppTypography.labelMedium,
-        unselectedLabelStyle:
-        AppTypography.bodyMedium,
-        indicatorColor: AppColors.primary,
-        indicatorSize: TabBarIndicatorSize.label,
-        dividerColor: AppColors.border,
-        tabs: tabs.map((t) => Tab(text: t)).toList(),
-      ),
-    );
-  }
-
-  @override
-  bool shouldRebuild(
-      _TabBarDelegate oldDelegate,
-      ) {
-    return oldDelegate.tabController !=
-        tabController ||
-        oldDelegate.isDark != isDark;
-  }
-}
-
-class _MenuList extends StatelessWidget {
-  final List<FoodItemModel> items;
-  final Function(FoodItemModel) onAddToCart;
-
-  const _MenuList({
-    required this.items,
-    required this.onAddToCart,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      return Center(
-        child: Column(
-          mainAxisAlignment:
-          MainAxisAlignment.center,
-          children: [
-            const Icon(
-              Icons.restaurant_menu_rounded,
-              size: 48,
-              color: AppColors.textHint,
-            ),
-            const SizedBox(
-              height: AppSpacing.md,
-            ),
-            Text(
-              'No items here',
-              style: AppTypography.bodyMedium,
-            ),
-          ],
-        ),
-      );
-    }
-
-    return ListView.builder(
-      padding: const EdgeInsets.symmetric(
-        vertical: AppSpacing.sm,
-      ),
-      itemCount: items.length,
-      itemBuilder: (context, index) => _FoodItemTile(
-        item: items[index],
-        onAddToCart: () =>
-            onAddToCart(items[index]),
-      ),
-    );
-  }
-}
-
-class _FoodItemTile extends StatelessWidget {
-  final FoodItemModel item;
-  final VoidCallback onAddToCart;
-
-  const _FoodItemTile({
-    required this.item,
-    required this.onAddToCart,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return GlassCard(
-      margin: const EdgeInsets.symmetric(
-        horizontal: AppSpacing.screenHorizontal,
-        vertical: AppSpacing.xs,
-      ),
-      padding: const EdgeInsets.all(
-        AppSpacing.sm,
-      ),
-      borderRadius: AppSpacing.radiusLg,
-      child: Row(
-        children: [
-          Stack(
-            children: [
-              ClipRRect(
-                borderRadius: BorderRadius.circular(
-                  AppSpacing.radiusMd,
-                ),
-                child: Image.network(
-                  item.imageUrl,
-                  width: AppSpacing.menuItemImageSize,
-                  height: AppSpacing.menuItemImageSize,
-                  fit: BoxFit.cover,
-                  loadingBuilder:
-                      (context, child, progress) {
-                    if (progress == null) {
-                      return child;
-                    }
-
-                    return Container(
-                      width:
-                      AppSpacing.menuItemImageSize,
-                      height:
-                      AppSpacing.menuItemImageSize,
-                      color: AppColors.border,
-                    );
-                  },
-                  errorBuilder:
-                      (_, __, ___) => Container(
-                    width:
-                    AppSpacing.menuItemImageSize,
-                    height:
-                    AppSpacing.menuItemImageSize,
-                    color: AppColors.border,
-                    child: const Icon(
-                      Icons.fastfood_rounded,
-                      color: AppColors.textHint,
-                      size: 28,
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 4,
-                left: 4,
-                child: Container(
-                  width: 14,
-                  height: 14,
-                  decoration: BoxDecoration(
-                    color: AppColors.white,
-                    borderRadius:
-                    BorderRadius.circular(2),
-                    border: Border.all(
-                      color: item.isVeg
-                          ? AppColors.success
-                          : AppColors.error,
-                      width: 1.5,
-                    ),
-                  ),
-                  child: Center(
-                    child: Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: item.isVeg
-                            ? AppColors.success
-                            : AppColors.error,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(width: AppSpacing.sm),
-          Expanded(
-            child: Column(
-              crossAxisAlignment:
-              CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Expanded(
-                      child: Text(
-                        item.name,
-                        style: AppTypography
-                            .headingSmall
-                            .copyWith(fontSize: 14),
-                        maxLines: 1,
-                        overflow:
-                        TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (item.offer != null)
-                      Container(
-                        padding:
-                        const EdgeInsets.symmetric(
-                          horizontal:
-                          AppSpacing.xs,
-                          vertical: 2,
-                        ),
-                        decoration: BoxDecoration(
-                          color:
-                          AppColors.successLight,
-                          borderRadius:
-                          BorderRadius.circular(
-                            4,
-                          ),
-                        ),
-                        child: Text(
-                          item.offer!,
-                          style: AppTypography
-                              .labelSmall
-                              .copyWith(
-                            color:
-                            AppColors.success,
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 2),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.star_rounded,
-                      color: AppColors.accent,
-                      size: 13,
-                    ),
-                    const SizedBox(width: 2),
-                    Text(
-                      '${item.rating}',
-                      style: AppTypography.labelSmall
-                          .copyWith(
-                        color:
-                        AppColors.textPrimary,
-                      ),
-                    ),
-                    const SizedBox(
-                      width: AppSpacing.xs,
-                    ),
-                    const Icon(
-                      Icons.circle,
-                      size: 3,
-                      color: AppColors.textHint,
-                    ),
-                    const SizedBox(
-                      width: AppSpacing.xs,
-                    ),
-                    Text(
-                      '${item.deliveryTimeMin} min',
-                      style: AppTypography.bodySmall,
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          Column(
-            crossAxisAlignment:
-            CrossAxisAlignment.end,
-            children: [
-              Text(
-                'Rs. ${item.price.toInt()}',
-                style: AppTypography.priceMedium,
-              ),
-              const SizedBox(
-                height: AppSpacing.xs,
-              ),
-              GestureDetector(
-                onTap: onAddToCart,
-                child: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: AppColors.primary,
-                    borderRadius:
-                    BorderRadius.circular(
-                      AppSpacing.radiusSm,
-                    ),
-                  ),
-                  child: const Icon(
-                    Icons.add_rounded,
-                    color: AppColors.white,
-                    size: 20,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
     );
   }
 }

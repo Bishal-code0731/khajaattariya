@@ -1,11 +1,11 @@
 {
-    "name": "khajaattariya",
-    "short_name": "khajaattariya",
+    "name": "Khaja Attariya",
+    "short_name": "Khaja Attariya",
     "start_url": ".",
     "display": "standalone",
-    "background_color": "#0175C2",
-    "theme_color": "#0175C2",
-    "description": "Food delivery app for Attariya",
+    "background_color": "#0B6E4F",
+    "theme_color": "#0B6E4F",
+    "description": "Local food from Attariya restaurants, delivered fast.",
     "orientation": "portrait-primary",
     "prefer_related_applications": false,
     "icons": [

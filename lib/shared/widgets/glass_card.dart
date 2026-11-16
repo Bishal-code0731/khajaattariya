@@ -1,66 +1,32 @@
-import 'dart:ui';
 import 'package:flutter/material.dart';
+import 'app_card.dart';
 
+/// Legacy name kept so older screens compile.
 class GlassCard extends StatelessWidget {
-  final Widget child;
-  final double? width;
-  final double? height;
-  final EdgeInsetsGeometry? padding;
-  final EdgeInsetsGeometry? margin;
-  final double borderRadius;
-  final double blur;
-  final double opacity;
-  final Color? borderColor;
-  final VoidCallback? onTap;
-
   const GlassCard({
     super.key,
     required this.child,
-    this.width,
-    this.height,
     this.padding,
     this.margin,
     this.borderRadius = 16,
-    this.blur = 12,
-    this.opacity = 0.15,
-    this.borderColor,
     this.onTap,
+    this.elevation,
   });
 
-  @override
-  Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final EdgeInsetsGeometry? margin;
+  final double borderRadius;
+  final VoidCallback? onTap;
+  final double? elevation;
 
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: width,
-        height: height,
+  @override
+  Widget build(BuildContext context) => AppCard(
+        padding: padding ?? EdgeInsets.zero,
         margin: margin,
-        child: ClipRRect(
-          borderRadius: BorderRadius.circular(borderRadius),
-          child: BackdropFilter(
-            filter: ImageFilter.blur(sigmaX: blur, sigmaY: blur),
-            child: Container(
-              padding: padding,
-              decoration: BoxDecoration(
-                color: isDark
-                    ? Colors.white.withOpacity(opacity)
-                    : Colors.white.withOpacity(opacity + 0.55),
-                borderRadius: BorderRadius.circular(borderRadius),
-                border: Border.all(
-                  color: borderColor ??
-                      (isDark
-                          ? Colors.white.withOpacity(0.15)
-                          : Colors.white.withOpacity(0.7)),
-                  width: 1,
-                ),
-              ),
-              child: child,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
+        radius: borderRadius,
+        onTap: onTap,
+        elevated: (elevation ?? 0) > 0,
+        child: child,
+      );
 }

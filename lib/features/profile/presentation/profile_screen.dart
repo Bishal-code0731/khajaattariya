@@ -1,78 +1,28 @@
-import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:image_picker/image_picker.dart';
+import '../../../core/l10n/app_language.dart';
+import '../../../core/l10n/s.dart';
+import '../../../core/router/navigation_extensions.dart';
 import '../../../core/router/route_names.dart';
-import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/app_typography.dart';
-import '../../../features/auth/application/auth_provider.dart';
-import '../../../features/auth/domain/models/user_model.dart';
-import '../../../main.dart';
+import '../../../shared/providers/theme_provider.dart';
 import '../../../shared/widgets/app_button.dart';
-import '../../../shared/widgets/app_text_field.dart';
-import '../../../shared/widgets/glass_card.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
-
-// Profile update notifier
-final profileUpdateProvider =
-StateNotifierProvider<ProfileUpdateNotifier, AsyncValue<void>>(
-      (ref) => ProfileUpdateNotifier(),
-);
-
-class ProfileUpdateNotifier extends StateNotifier<AsyncValue<void>> {
-  ProfileUpdateNotifier() : super(const AsyncValue.data(null));
-
-  Future<bool> updateProfile({
-    required String userId,
-    required String fullName,
-    required String phone,
-  }) async {
-    state = const AsyncValue.loading();
-    try {
-      await supabase.from('profiles').update({
-        'full_name': fullName,
-        'phone': phone,
-        'updated_at': DateTime.now().toIso8601String(),
-      }).eq('id', userId);
-      state = const AsyncValue.data(null);
-      return true;
-    } catch (e) {
-      state = AsyncValue.error(e, StackTrace.current);
-      return false;
-    }
-  }
-
-  Future<String?> uploadAvatar({
-    required String userId,
-    required File file,
-  }) async {
-    state = const AsyncValue.loading();
-    try {
-      final ext = file.path.split('.').last;
-      final path = '$userId/avatar.$ext';
-
-      await supabase.storage.from('avatars').upload(
-        path,
-        file,
-        fileOptions: const FileOptions(upsert: true),
-      );
-
-      final url = supabase.storage.from('avatars').getPublicUrl(path);
-
-      await supabase
-          .from('profiles')
-          .update({'avatar_url': url}).eq('id', userId);
-
-      state = const AsyncValue.data(null);
-      return url;
-    } catch (e) {
-      state = AsyncValue.error(e, StackTrace.current);
-      return null;
-    }
-  }
-}
+import '../../../shared/widgets/app_card.dart';
+import '../../../shared/widgets/app_dialog.dart';
+import '../../../shared/widgets/app_snackbar.dart';
+import '../../../shared/widgets/app_top_bar.dart';
+import '../../../shared/widgets/error_state_view.dart';
+import '../../../shared/widgets/shimmer_loader.dart';
+import '../../auth/application/auth_provider.dart';
+import '../../auth/domain/models/user_model.dart';
+import '../../notifications/application/notification_provider.dart';
+import '../application/profile_provider.dart';
+import 'widgets/account_menu.dart';
+import 'widgets/edit_profile_sheet.dart';
+import 'widgets/profile_header.dart';
+import 'widgets/settings_sheets.dart';
 
 class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
@@ -82,338 +32,196 @@ class ProfileScreen extends ConsumerStatefulWidget {
 }
 
 class _ProfileScreenState extends ConsumerState<ProfileScreen> {
-  final _formKey = GlobalKey<FormState>();
-  late TextEditingController _nameController;
-  late TextEditingController _phoneController;
-  bool _isEditing = false;
-  bool _isLoading = false;
+  bool _uploadingPhoto = false;
+  bool _signingOut = false;
 
-  @override
-  void initState() {
-    super.initState();
-    final user = ref.read(authStateProvider).valueOrNull;
-    _nameController = TextEditingController(text: user?.fullName ?? '');
-    _phoneController = TextEditingController(text: user?.phone ?? '');
-  }
-
-  @override
-  void dispose() {
-    _nameController.dispose();
-    _phoneController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _pickAndUploadAvatar(String userId) async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(
-      source: ImageSource.gallery,
-      maxWidth: 512,
-      maxHeight: 512,
-      imageQuality: 80,
-    );
-    if (picked == null) return;
-
-    setState(() => _isLoading = true);
-    final url = await ref.read(profileUpdateProvider.notifier).uploadAvatar(
-      userId: userId,
-      file: File(picked.path),
-    );
-    if (!mounted) return;
-    setState(() => _isLoading = false);
-
-    if (url != null) {
-      // Refresh auth state so side menu + avatar updates
-      ref.invalidate(authStateProvider);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Avatar updated'),
-          backgroundColor: AppColors.success,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to upload avatar'),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+  Future<void> _changePhoto(UserModel user) async {
+    if (_uploadingPhoto) return;
+    setState(() => _uploadingPhoto = true);
+    try {
+      final url = await ref
+          .read(profileUpdateProvider.notifier)
+          .pickAndUploadAvatar(user.id);
+      if (url != null) {
+        ref.invalidate(authStateProvider);
+        if (mounted) {
+          AppSnackbar.success(context, context.s.account.photoUpdated);
+        }
+      }
+    } catch (e) {
+      if (mounted) AppSnackbar.error(context, e);
+    } finally {
+      if (mounted) setState(() => _uploadingPhoto = false);
     }
   }
 
-  Future<void> _saveProfile(UserModel user) async {
-    if (!_formKey.currentState!.validate()) return;
-    setState(() => _isLoading = true);
-
-    final success = await ref.read(profileUpdateProvider.notifier).updateProfile(
-      userId: user.id,
-      fullName: _nameController.text.trim(),
-      phone: _phoneController.text.trim(),
+  Future<void> _logout() async {
+    if (_signingOut) return;
+    final a = context.s.account;
+    final ok = await AppDialog.confirm(
+      context,
+      title: a.logoutTitle,
+      message: a.logoutMessage,
+      confirmLabel: context.s.common.logout,
+      destructive: true,
+      icon: Icons.logout_rounded,
     );
-
+    if (!ok || !mounted) return;
+    setState(() => _signingOut = true);
+    await ref.read(authNotifierProvider.notifier).signOut();
     if (!mounted) return;
-    setState(() {
-      _isLoading = false;
-      if (success) _isEditing = false;
-    });
-
-    if (success) {
-      ref.invalidate(authStateProvider);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Profile updated'),
-          backgroundColor: AppColors.success,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Failed to update profile'),
-          backgroundColor: AppColors.error,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+    final result = ref.read(authNotifierProvider);
+    if (result.hasError) {
+      setState(() => _signingOut = false);
+      AppSnackbar.error(context, result.error);
+      return;
     }
+    context.go(RouteNames.home);
   }
 
   @override
   Widget build(BuildContext context) {
     final userAsync = ref.watch(authStateProvider);
-
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text('My Profile'),
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back_rounded),
-          onPressed: () => context.go(RouteNames.home),
-        ),
-        actions: [
-          if (!_isEditing)
-            TextButton(
-              onPressed: () => setState(() => _isEditing = true),
-              child: const Text('Edit'),
-            )
-          else
-            TextButton(
-              onPressed: () => setState(() {
-                _isEditing = false;
-                final user = userAsync.valueOrNull;
-                if (user != null) {
-                  _nameController.text = user.fullName;
-                  _phoneController.text = user.phone ?? '';
-                }
-              }),
-              child: Text(
-                'Cancel',
-                style: TextStyle(color: AppColors.error),
-              ),
-            ),
-        ],
-      ),
+      appBar: AppTopBar(title: context.s.account.accountTitle),
       body: userAsync.when(
-        loading: () => const Center(
-          child: CircularProgressIndicator(color: AppColors.primary),
-        ),
-        error: (_, __) => const Center(
-          child: Text('Could not load profile'),
-        ),
+        loading: () => const AppShimmerCardList(count: 3, itemHeight: 72),
+        error: (e, _) => AppErrorState(
+            error: e, onRetry: () => ref.invalidate(authStateProvider)),
         data: (user) {
           if (user == null) {
-            return Center(
-              child: AppButton(
-                label: 'Login',
-                onPressed: () => context.go(RouteNames.login),
-              ),
-            );
+            return const AppShimmerCardList(count: 3, itemHeight: 72);
           }
-          return SingleChildScrollView(
-            padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
-            child: Form(
-              key: _formKey,
-              child: Column(
-                children: [
-                  const SizedBox(height: AppSpacing.lg),
-                  _AvatarSection(
-                    user: user,
-                    isLoading: _isLoading,
-                    onPickImage: () => _pickAndUploadAvatar(user.id),
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                  GlassCard(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    borderRadius: AppSpacing.radiusLg,
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text('Account Info',
-                            style: AppTypography.headingSmall),
-                        const SizedBox(height: AppSpacing.md),
-                        AppTextField(
-                          label: 'Full Name',
-                          controller: _nameController,
-                          prefixIcon: Icons.person_outline_rounded,
-                          enabled: _isEditing,
-                          validator: (v) => v == null || v.isEmpty
-                              ? 'Name is required'
-                              : null,
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        AppTextField(
-                          label: 'Phone',
-                          controller: _phoneController,
-                          prefixIcon: Icons.phone_outlined,
-                          keyboardType: TextInputType.phone,
-                          enabled: _isEditing,
-                        ),
-                        const SizedBox(height: AppSpacing.md),
-                        // Email — read only always
-                        AppTextField(
-                          label: 'Email',
-                          controller:
-                          TextEditingController(text: user.email),
-                          prefixIcon: Icons.email_outlined,
-                          enabled: false,
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(height: AppSpacing.md),
-                  // Role badge card
-                  GlassCard(
-                    padding: const EdgeInsets.all(AppSpacing.md),
-                    borderRadius: AppSpacing.radiusLg,
-                    child: Row(
-                      children: [
-                        const Icon(Icons.badge_outlined,
-                            color: AppColors.textSecondary),
-                        const SizedBox(width: AppSpacing.md),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text('Account Type',
-                                style: AppTypography.bodySmall.copyWith(
-                                    color: AppColors.textSecondary)),
-                            const SizedBox(height: 2),
-                            Container(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: AppSpacing.sm,
-                                vertical: 3,
-                              ),
-                              decoration: BoxDecoration(
-                                color: AppColors.primary.withValues(alpha: 0.1),
-                                borderRadius: BorderRadius.circular(
-                                    AppSpacing.radiusSm),
-                              ),
-                              child: Text(
-                                user.role.toUpperCase(),
-                                style: AppTypography.labelSmall.copyWith(
-                                  color: AppColors.primary,
-                                  fontWeight: FontWeight.w700,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_isEditing) ...[
-                    const SizedBox(height: AppSpacing.xl),
-                    AppButton(
-                      label: 'Save Changes',
-                      isLoading: _isLoading,
-                      onPressed: () => _saveProfile(user),
-                    ),
-                  ],
-                  const SizedBox(height: AppSpacing.xl),
-                  // Logout button
-                  AppButton(
-                    label: 'Logout',
-                    isOutlined: true,
-                    onPressed: () =>
-                        ref.read(authNotifierProvider.notifier).signOut(),
-                  ),
-                  const SizedBox(height: AppSpacing.xl),
-                ],
-              ),
-            ),
-          );
+          return _buildHub(context, user);
         },
       ),
     );
   }
-}
 
-class _AvatarSection extends StatelessWidget {
-  final UserModel user;
-  final bool isLoading;
-  final VoidCallback onPickImage;
+  Widget _buildHub(BuildContext context, UserModel user) {
+    final a = context.s.account;
+    final c = context.s.common;
+    final p = context.palette;
+    final role = user.userRole;
+    final language = ref.watch(languageNotifierProvider);
+    final themeMode = ref.watch(themeNotifierProvider);
+    final unread = ref.watch(unreadCountProvider(user.id)).valueOrNull ?? 0;
 
-  const _AvatarSection({
-    required this.user,
-    required this.isLoading,
-    required this.onPickImage,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      alignment: Alignment.center,
-      children: [
-        CircleAvatar(
-          radius: 52,
-          backgroundColor: AppColors.primary.withOpacity(0.15),
-          backgroundImage: user.avatarUrl != null
-              ? NetworkImage(user.avatarUrl!)
-              : null,
-          child: user.avatarUrl == null
-              ? Text(
-            user.fullName.isNotEmpty
-                ? user.fullName[0].toUpperCase()
-                : '?',
-            style: AppTypography.displayMedium
-                .copyWith(color: AppColors.primary),
-          )
-              : null,
-        ),
-        if (isLoading)
-          Container(
-            width: 104,
-            height: 104,
-            decoration: BoxDecoration(
-              color: Colors.black38,
-              shape: BoxShape.circle,
-            ),
-            child: const CircularProgressIndicator(
-              color: Colors.white,
-              strokeWidth: 2,
-            ),
+    return Align(
+      alignment: Alignment.topCenter,
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 640),
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.screenHorizontal,
+            AppSpacing.lg,
+            AppSpacing.screenHorizontal,
+            AppSpacing.xxxl,
           ),
-        Positioned(
-          bottom: 0,
-          right: 0,
-          child: GestureDetector(
-            onTap: isLoading ? null : onPickImage,
-            child: Container(
-              width: 32,
-              height: 32,
-              decoration: BoxDecoration(
-                color: AppColors.primary,
-                shape: BoxShape.circle,
-                border: Border.all(
-                  color: Theme.of(context).scaffoldBackgroundColor,
-                  width: 2,
-                ),
+          children: [
+            AppCard(
+              child: ProfileHeader(
+                user: user,
+                isUploadingPhoto: _uploadingPhoto,
+                onChangePhoto: () => _changePhoto(user),
+                onEdit: () => showEditProfileSheet(context, user),
               ),
-              child: const Icon(Icons.camera_alt_rounded,
-                  color: Colors.white, size: 16),
             ),
-          ),
+            const SizedBox(height: AppSpacing.xl),
+            if (!user.isCustomer) ...[
+              AccountMenuGroup(
+                title: a.sectionWork,
+                children: [
+                  AccountMenuTile(
+                    icon: Icons.space_dashboard_outlined,
+                    title: a.backToDashboard,
+                    subtitle: a.backToDashboardSub,
+                    onTap: () => context.go(role.homeRoute),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xl),
+            ],
+            if (user.isCustomer) ...[
+              AccountMenuGroup(
+                title: a.sectionOrders,
+                children: [
+                  AccountMenuTile(
+                    icon: Icons.receipt_long_outlined,
+                    title: a.myOrders,
+                    subtitle: a.myOrdersSub,
+                    onTap: () => context.pushOnce(RouteNames.orders),
+                  ),
+                  AccountMenuTile(
+                    icon: Icons.location_on_outlined,
+                    title: a.savedAddresses,
+                    subtitle: a.savedAddressesSub,
+                    onTap: () => context.pushOnce(RouteNames.addressBook),
+                  ),
+                  AccountMenuTile(
+                    icon: Icons.favorite_border_rounded,
+                    title: a.savedRestaurants,
+                    subtitle: a.savedRestaurantsSub,
+                    onTap: () => context.pushOnce(RouteNames.favorites),
+                  ),
+                ],
+              ),
+              const SizedBox(height: AppSpacing.xl),
+            ],
+            AccountMenuGroup(
+              title: a.sectionActivity,
+              children: [
+                AccountMenuTile(
+                  icon: Icons.notifications_none_rounded,
+                  title: a.notifications,
+                  subtitle: a.notificationsSub,
+                  badgeCount: unread,
+                  onTap: () => context.pushOnce(RouteNames.notifications),
+                ),
+                AccountMenuTile(
+                  icon: Icons.support_agent_rounded,
+                  title: a.helpSupport,
+                  subtitle: a.helpSupportSub,
+                  onTap: () => context.pushOnce(RouteNames.support),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xl),
+            AccountMenuGroup(
+              title: a.sectionSettings,
+              children: [
+                AccountMenuTile(
+                  icon: Icons.translate_rounded,
+                  title: c.language,
+                  value: language.nativeName,
+                  onTap: () => showLanguageSheet(context),
+                ),
+                AccountMenuTile(
+                  icon: Icons.contrast_rounded,
+                  title: c.theme,
+                  value: themeModeLabel(context, themeMode),
+                  onTap: () => showAppearanceSheet(context),
+                ),
+                AccountMenuTile(
+                  icon: Icons.info_outline_rounded,
+                  title: a.about,
+                  value: appVersion,
+                  onTap: () => showAboutSheet(context),
+                ),
+              ],
+            ),
+            const SizedBox(height: AppSpacing.xxl),
+            AppButton(
+              label: c.logout,
+              onPressed: _logout,
+              isLoading: _signingOut,
+              variant: AppButtonVariant.outline,
+              color: p.error,
+              leadingIcon: Icons.logout_rounded,
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

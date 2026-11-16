@@ -1,16 +1,35 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import '../../../core/l10n/s.dart';
 import '../../../core/router/route_names.dart';
-import '../../../core/theme/app_colors.dart';
+import '../../../core/theme/app_palette.dart';
 import '../../../core/theme/app_spacing.dart';
-import '../../../core/theme/app_typography.dart';
-import '../../../shared/widgets/glass_card.dart';
+import '../../../core/theme/app_text_styles.dart';
+import '../../../core/utils/app_logger.dart';
+import '../../../core/utils/formatters.dart';
+import '../../../core/utils/validators.dart';
+import '../../../shared/widgets/app_button.dart';
+import '../../../shared/widgets/app_card.dart';
+import '../../../shared/widgets/app_dialog.dart';
+import '../../../shared/widgets/app_snackbar.dart';
+import '../../../shared/widgets/app_text_field.dart';
+import '../../../shared/widgets/app_top_bar.dart';
+import '../../../shared/widgets/empty_state_view.dart';
+import '../../../shared/widgets/offline_banner.dart';
+import '../../address/application/address_provider.dart';
+import '../../address/domain/models/address_model.dart';
+import '../../auth/application/auth_provider.dart';
+import '../../orders/application/order_provider.dart';
+import '../../payments/application/coupon_provider.dart';
+import '../../payments/domain/models/coupon_model.dart';
 import '../application/cart_notifier.dart';
-import '../../../features/auth/application/auth_provider.dart';
-import '../../../features/orders/application/order_provider.dart';
-import '../../../features/payments/application/coupon_provider.dart';
-import '../../../features/payments/domain/models/coupon_model.dart';
+import '../domain/delivery_fee_estimate.dart';
+import 'widgets/bill_details_card.dart';
+import 'widgets/cart_group_card.dart';
+import 'widgets/coupon_card.dart';
+import 'widgets/delivery_address_card.dart';
+import '../../../shared/widgets/busy_overlay.dart';
 
 class CartScreen extends ConsumerStatefulWidget {
   const CartScreen({super.key});
@@ -20,250 +39,335 @@ class CartScreen extends ConsumerStatefulWidget {
 }
 
 class _CartScreenState extends ConsumerState<CartScreen> {
-  final _notesCtrl    = TextEditingController();
-  final _addressCtrl  = TextEditingController();
-  final _couponCtrl   = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
+  final _notesCtrl = TextEditingController();
+  final _addressCtrl = TextEditingController();
+  final _couponCtrl = TextEditingController();
+
+  /// Saved address the user picked; null = default (first) saved address.
+  String? _pickedAddressId;
+
+  /// The user chose "Type a different address".
+  bool _typeOwnAddress = false;
+  bool _submitting = false;
 
   @override
   void dispose() {
-    _notesCtrl.dispose(); _addressCtrl.dispose(); _couponCtrl.dispose();
+    _notesCtrl.dispose();
+    _addressCtrl.dispose();
+    _couponCtrl.dispose();
     super.dispose();
   }
 
+  List<AddressModel> _savedAddresses(String? userId) => userId == null
+      ? const []
+      : (ref.watch(addressListProvider(userId)).valueOrNull ?? const []);
+
+  AddressModel? _selectedAddress(List<AddressModel> saved) {
+    if (_typeOwnAddress || saved.isEmpty) return null;
+    for (final a in saved) {
+      if (a.id == _pickedAddressId) return a;
+    }
+    return saved.first; // list is ordered default-first
+  }
+
+  Future<void> _confirmClear() async {
+    final s = context.s.customer;
+    final ok = await AppDialog.confirm(
+      context,
+      title: s.clearCartTitle,
+      message: s.clearCartBody,
+      confirmLabel: s.clearCart,
+      destructive: true,
+      icon: Icons.remove_shopping_cart_outlined,
+    );
+    if (!ok || !mounted) return;
+    ref.read(cartNotifierProvider.notifier).clearCart();
+    ref.read(couponValidationProvider.notifier).clear();
+  }
+
+  Future<void> _applyCoupon(double subtotal) async {
+    final s = context.s.customer;
+    final code = _couponCtrl.text.trim();
+    if (code.isEmpty) {
+      AppSnackbar.warning(context, s.couponEnterCode);
+      return;
+    }
+    final user = ref.read(authStateProvider).valueOrNull;
+    if (user == null) {
+      context.push(RouteNames.login);
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    await ref
+        .read(couponValidationProvider.notifier)
+        .validateCoupon(code: code, orderTotal: subtotal, customerId: user.id);
+  }
+
+  void _removeCoupon() {
+    ref.read(couponValidationProvider.notifier).clear();
+    _couponCtrl.clear();
+    AppSnackbar.info(context, context.s.customer.couponRemoved);
+  }
+
+  Future<void> _checkout(double discount, CouponModel? coupon) async {
+    if (_submitting) return;
+    final user = ref.read(authStateProvider).valueOrNull;
+    if (user == null) {
+      context.push(RouteNames.login);
+      return;
+    }
+
+    // Resolve the delivery address: a saved one (validated too) or typed.
+    final selected = _selectedAddress(
+        ref.read(addressListProvider(user.id)).valueOrNull ?? const []);
+    String address;
+    if (selected != null) {
+      address = DeliveryAddressCard.addressText(context, selected);
+      if (context.validators.address(address) != null) {
+        // Saved address is unusable — let the user fix it as text.
+        setState(() {
+          _typeOwnAddress = true;
+          _addressCtrl.text = address;
+        });
+        WidgetsBinding.instance
+            .addPostFrameCallback((_) => _formKey.currentState?.validate());
+        return;
+      }
+    } else {
+      address = _addressCtrl.text.trim();
+    }
+    // Validates the typed address (when shown) and the note.
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _submitting = true);
+    try {
+      final cart = ref.read(cartNotifierProvider);
+      final orders = await ref.read(placeOrderProvider.notifier).placeOrder(
+            cart: cart,
+            customerId: user.id,
+            deliveryAddress: address,
+            notes:
+                _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
+          );
+      if (!mounted) return;
+      if (orders == null || orders.isEmpty) {
+        final err = ref.read(placeOrderProvider).error;
+        AppSnackbar.error(context, err);
+        return;
+      }
+
+      // Server-computed totals.
+      final rawTotal = orders.fold<double>(0, (s, o) => s + o.totalAmount);
+      final discountPerOrder = <String, double>{
+        for (final o in orders)
+          o.id: discount > 0 && rawTotal > 0
+              ? discount * o.totalAmount / rawTotal
+              : 0,
+      };
+      final orderAmounts = <String, double>{
+        for (final o in orders)
+          o.id: o.totalAmount - (discountPerOrder[o.id] ?? 0),
+      };
+
+      if (coupon != null) {
+        try {
+          await ref
+              .read(couponValidationProvider.notifier)
+              .recordUsageForOrders(
+                couponId: coupon.id,
+                customerId: user.id,
+                discountPerOrder: discountPerOrder,
+              );
+        } catch (e, st) {
+          AppLogger.error('cart.recordUsage', e, st);
+        }
+      }
+
+      if (!mounted) return;
+      final finalTotal = orderAmounts.values.fold<double>(0, (a, b) => a + b);
+      ref.read(cartNotifierProvider.notifier).clearCart();
+      ref.read(couponValidationProvider.notifier).clear();
+      AppSnackbar.success(
+          context,
+          context.s.customer
+              .orderPlaced(AppFormat.money(context, finalTotal.round())));
+      context.push(RouteNames.payment, extra: {'orderAmounts': orderAmounts});
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
   @override
-  Widget build(BuildContext context) {
-    final cart          = ref.watch(cartNotifierProvider);
-    final placeState    = ref.watch(placeOrderProvider);
-    final couponState   = ref.watch(couponValidationProvider);
+  Widget build(BuildContext context) =>
+      BusyOverlay(busy: _submitting, child: _buildBusyContent(context));
+
+  Widget _buildBusyContent(BuildContext context) {
+    final p = context.palette;
+    final s = context.s.customer;
+    final cart = ref.watch(cartNotifierProvider);
+    final authAsync = ref.watch(authStateProvider);
+    final user = authAsync.valueOrNull;
+    final placing = ref.watch(placeOrderProvider).isLoading || _submitting;
+    final couponState = ref.watch(couponValidationProvider);
     final appliedCoupon = couponState.valueOrNull;
 
-    final double subtotal    = cart.totalAmount;
-    final double deliveryFee = 50;
-    final double discount    = appliedCoupon?.calculateDiscount(subtotal) ?? 0;
-    final double total       = subtotal + deliveryFee - discount;
+    final subtotal = cart.totalAmount;
+    final discount = appliedCoupon?.calculateDiscount(subtotal) ?? 0;
+    final bill = BillDetailsCard(
+      subtotal: subtotal.round(),
+      deliveryFee: (cart.groups.length * kEstimatedDeliveryFeePerOrder).round(),
+      discount: discount.round(),
+      orderCount: cart.groups.length,
+    );
+
+    Widget body;
+    Widget? bottom;
+    if (cart.isEmpty) {
+      body = AppEmptyState(
+        icon: Icons.shopping_bag_outlined,
+        title: s.emptyCartTitle,
+        subtitle: s.emptyCartBody,
+        action: AppButton(
+          label: s.backToHome,
+          expand: false,
+          leadingIcon: Icons.storefront_outlined,
+          onPressed: () => context.go(RouteNames.home),
+        ),
+      );
+    } else if (user == null && !authAsync.isLoading) {
+      body = AppEmptyState(
+        icon: Icons.lock_outline_rounded,
+        title: s.loginToOrderTitle,
+        subtitle: s.loginToOrderBody,
+        action: AppButton(
+          label: context.s.common.login,
+          expand: false,
+          onPressed: () => context.push(RouteNames.login),
+        ),
+      );
+    } else {
+      final saved = _savedAddresses(user?.id);
+      final selected = _selectedAddress(saved);
+      body = Form(
+        key: _formKey,
+        child: ListView(
+          padding: const EdgeInsets.fromLTRB(AppSpacing.screenHorizontal,
+              AppSpacing.md, AppSpacing.screenHorizontal, AppSpacing.xxl),
+          children: [
+            if (cart.groups.length > 1) ...[
+              AppCard(
+                color: p.infoSoft,
+                borderColor: p.info.withValues(alpha: 0.3),
+                padding: const EdgeInsets.all(AppSpacing.md),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Icon(Icons.info_outline_rounded, size: 18, color: p.info),
+                    const SizedBox(width: AppSpacing.sm),
+                    Expanded(
+                        child: Text(s.multiRestaurantNote(cart.groups.length),
+                            style: context.text.body)),
+                  ],
+                ),
+              ),
+              const SizedBox(height: AppSpacing.md),
+            ],
+            for (final group in cart.groups) ...[
+              CartGroupCard(key: ValueKey(group.restaurantId), group: group),
+              const SizedBox(height: AppSpacing.md),
+            ],
+            DeliveryAddressCard(
+              userId: user?.id,
+              controller: _addressCtrl,
+              selectedId: selected?.id,
+              onSelect: (a) => setState(() {
+                _typeOwnAddress = a == null;
+                _pickedAddressId = a?.id;
+              }),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            AppCard(
+              child: AppTextField(
+                label: s.notesLabel,
+                hint: s.notesHint,
+                controller: _notesCtrl,
+                prefixIcon: Icons.sticky_note_2_outlined,
+                maxLines: 3,
+                minLines: 1,
+                maxLength: 200,
+                textCapitalization: TextCapitalization.sentences,
+                validator: context.validators
+                    .text(s.notesField, max: 200, optional: true),
+              ),
+            ),
+            const SizedBox(height: AppSpacing.md),
+            CouponCard(
+              controller: _couponCtrl,
+              applied: appliedCoupon,
+              estimatedDiscount: discount,
+              isLoading: couponState.isLoading,
+              error: couponState.hasError ? couponState.error : null,
+              onApply: () => _applyCoupon(subtotal),
+              onRemove: _removeCoupon,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            bill,
+          ],
+        ),
+      );
+      bottom = DecoratedBox(
+        decoration: BoxDecoration(
+            color: p.surface, border: Border(top: BorderSide(color: p.border))),
+        child: SafeArea(
+          top: false,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(AppSpacing.screenHorizontal,
+                AppSpacing.md, AppSpacing.screenHorizontal, AppSpacing.md),
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 640),
+                child: AppButton(
+                  label: s.placeOrder(AppFormat.money(context, bill.total)),
+                  isLoading: placing,
+                  onPressed:
+                      placing ? null : () => _checkout(discount, appliedCoupon),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
 
     return Scaffold(
-      backgroundColor: Theme.of(context).scaffoldBackgroundColor,
-      appBar: AppBar(
-        title: const Text('My Cart'),
-        leading: IconButton(icon: const Icon(Icons.arrow_back_rounded), onPressed: () => context.pop()),
+      backgroundColor: p.background,
+      appBar: AppTopBar(
+        title: s.cartTitle,
+        subtitle: cart.isEmpty ? null : s.itemsCount(cart.totalItems),
         actions: [
           if (!cart.isEmpty)
-            TextButton(
-              onPressed: () {
-                ref.read(cartNotifierProvider.notifier).clearCart();
-                ref.read(couponValidationProvider.notifier).clear();
-              },
-              child: Text('Clear', style: AppTypography.bodyMedium.copyWith(color: AppColors.error)),
+            IconButton(
+              tooltip: s.clearCart,
+              icon: Icon(Icons.delete_sweep_outlined, color: p.error),
+              onPressed: placing ? null : _confirmClear,
             ),
         ],
       ),
-      body: cart.isEmpty ? _EmptyCart() : Column(children: [
-        Container(
-          margin: const EdgeInsets.all(AppSpacing.screenHorizontal),
-          padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm),
-          decoration: BoxDecoration(
-            color: AppColors.primary.withOpacity(0.08),
-            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
-            border: Border.all(color: AppColors.primary.withOpacity(0.2)),
-          ),
-          child: Row(children: [
-            const Icon(Icons.store_rounded, color: AppColors.primary, size: 18),
-            const SizedBox(width: AppSpacing.sm),
-            Text('Ordering from ${cart.restaurantName}',
-                style: AppTypography.bodyMedium.copyWith(color: AppColors.primary)),
-          ]),
-        ),
-        Expanded(child: ListView(
-          padding: const EdgeInsets.symmetric(vertical: AppSpacing.xs),
-          children: [
-            ...cart.items.map((item) => _CartItemTile(item: item)),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal, vertical: AppSpacing.sm),
-              child: TextField(controller: _addressCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Delivery Address', hintText: 'Enter your full address',
-                      prefixIcon: Icon(Icons.location_on_outlined))),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal, vertical: AppSpacing.xs),
-              child: TextField(controller: _notesCtrl,
-                  decoration: const InputDecoration(
-                      labelText: 'Notes (optional)', hintText: 'e.g. no onions',
-                      prefixIcon: Icon(Icons.note_outlined))),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal, vertical: AppSpacing.sm),
-              child: Row(children: [
-                Expanded(child: TextField(
-                  controller: _couponCtrl, textCapitalization: TextCapitalization.characters,
-                  decoration: InputDecoration(
-                    labelText: 'Coupon Code', hintText: 'Enter code',
-                    prefixIcon: const Icon(Icons.discount_outlined),
-                    suffixIcon: appliedCoupon != null
-                        ? IconButton(
-                        icon: const Icon(Icons.close_rounded, color: AppColors.error),
-                        onPressed: () {
-                          ref.read(couponValidationProvider.notifier).clear();
-                          _couponCtrl.clear();
-                        })
-                        : null,
-                  ),
-                )),
-                const SizedBox(width: AppSpacing.sm),
-                ElevatedButton(
-                  onPressed: couponState.isLoading ? null : () async {
-                    final user = ref.read(authStateProvider).valueOrNull;
-                    if (user == null) return;
-                    await ref.read(couponValidationProvider.notifier).validateCoupon(
-                        code: _couponCtrl.text, orderTotal: subtotal, customerId: user.id);
-                  },
-                  style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary,
-                      padding: const EdgeInsets.symmetric(horizontal: AppSpacing.md, vertical: AppSpacing.sm)),
-                  child: couponState.isLoading
-                      ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                      : const Text('Apply', style: TextStyle(color: Colors.white)),
-                ),
-              ]),
-            ),
-            if (couponState.hasError)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal),
-                child: Text(couponState.error.toString(),
-                    style: AppTypography.bodySmall.copyWith(color: AppColors.error)),
-              ),
-            if (appliedCoupon != null)
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal, vertical: AppSpacing.xs),
-                child: Container(
-                  padding: const EdgeInsets.all(AppSpacing.sm),
-                  decoration: BoxDecoration(color: AppColors.successLight,
-                      borderRadius: BorderRadius.circular(AppSpacing.radiusMd)),
-                  child: Row(children: [
-                    const Icon(Icons.check_circle_rounded, color: AppColors.success, size: 16),
-                    const SizedBox(width: AppSpacing.xs),
-                    Text('${appliedCoupon.code} applied — Rs. ${discount.toInt()} off',
-                        style: AppTypography.bodySmall.copyWith(color: AppColors.success)),
-                  ]),
-                ),
-              ),
-            Padding(
-              padding: const EdgeInsets.all(AppSpacing.screenHorizontal),
-              child: GlassCard(
-                padding: const EdgeInsets.all(AppSpacing.md), borderRadius: AppSpacing.radiusLg,
-                child: Column(children: [
-                  _SummaryRow(label: 'Subtotal',    value: 'Rs. ${subtotal.toInt()}'),
-                  _SummaryRow(label: 'Delivery Fee', value: 'Rs. ${deliveryFee.toInt()}'),
-                  if (discount > 0)
-                    _SummaryRow(label: 'Discount', value: '- Rs. ${discount.toInt()}', valueColor: AppColors.success),
-                  const Divider(height: AppSpacing.md),
-                  _SummaryRow(label: 'Total', value: 'Rs. ${total.toInt()}', bold: true),
-                ]),
-              ),
-            ),
-            const SizedBox(height: AppSpacing.xl),
-          ],
-        )),
-        SafeArea(child: Padding(
-          padding: const EdgeInsets.fromLTRB(AppSpacing.screenHorizontal, 0, AppSpacing.screenHorizontal, AppSpacing.md),
-          child: SizedBox(width: double.infinity,
-            child: ElevatedButton(
-              onPressed: placeState.isLoading ? null : () => _checkout(context, total, appliedCoupon),
-              style: ElevatedButton.styleFrom(backgroundColor: AppColors.primary,
-                  padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(AppSpacing.radiusMd))),
-              child: placeState.isLoading
-                  ? const SizedBox(height: 20, width: 20, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                  : Text('Proceed to Payment · Rs. ${total.toInt()}',
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+      body: Column(
+        children: [
+          const OfflineBanner(),
+          Expanded(
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 640),
+                  child: body),
             ),
           ),
-        )),
-      ]),
+        ],
+      ),
+      bottomNavigationBar: bottom,
     );
-  }
-
-  Future<void> _checkout(BuildContext context, double total, CouponModel? coupon) async {
-    final user = ref.read(authStateProvider).valueOrNull;
-    if (user == null) { context.push(RouteNames.login); return; }
-    final cart = ref.read(cartNotifierProvider);
-    final order = await ref.read(placeOrderProvider.notifier).placeOrder(
-      cart: cart,
-      customerId: user.id,
-      deliveryAddress: _addressCtrl.text.trim().isEmpty ? null : _addressCtrl.text.trim(),
-      notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
-    );
-    if (order == null || !context.mounted) return;
-    if (coupon != null) {
-      await ref.read(couponValidationProvider.notifier).recordUsage(
-        couponId: coupon.id, customerId: user.id,
-        orderId: order.id, discountApplied: coupon.calculateDiscount(cart.totalAmount),
-      );
-    }
-    ref.read(cartNotifierProvider.notifier).clearCart();
-    ref.read(couponValidationProvider.notifier).clear();
-    context.push(RouteNames.payment, extra: {'orderId': order.id, 'amount': total});
-  }
-}
-
-class _CartItemTile extends ConsumerWidget {
-  final dynamic item;
-  const _CartItemTile({required this.item});
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    return GlassCard(
-      margin: const EdgeInsets.symmetric(horizontal: AppSpacing.screenHorizontal, vertical: AppSpacing.xs),
-      padding: const EdgeInsets.all(AppSpacing.sm), borderRadius: AppSpacing.radiusMd,
-      child: Row(children: [
-        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-          Text(item.food.name, style: AppTypography.bodyMedium),
-          Text('Rs. ${item.food.price.toInt()} each', style: AppTypography.bodySmall),
-        ])),
-        Row(children: [
-          IconButton(
-              icon: const Icon(Icons.remove_circle_outline_rounded, size: 22, color: AppColors.primary),
-              onPressed: () => ref.read(cartNotifierProvider.notifier).decrementQuantity(item.food.id)),
-          Text('${item.quantity}', style: AppTypography.labelMedium),
-          IconButton(
-              icon: const Icon(Icons.add_circle_outline_rounded, size: 22, color: AppColors.primary),
-              onPressed: () => ref.read(cartNotifierProvider.notifier).incrementQuantity(item.food.id)),
-        ]),
-        SizedBox(width: 60,
-            child: Text('Rs. ${(item.food.price * item.quantity).toInt()}',
-                style: AppTypography.labelMedium.copyWith(color: AppColors.primary), textAlign: TextAlign.right)),
-      ]),
-    );
-  }
-}
-
-class _SummaryRow extends StatelessWidget {
-  final String label; final String value; final bool bold; final Color? valueColor;
-  const _SummaryRow({required this.label, required this.value, this.bold = false, this.valueColor});
-
-  @override
-  Widget build(BuildContext context) {
-    final style = bold ? AppTypography.headingSmall : AppTypography.bodyMedium;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
-        Text(label, style: style),
-        Text(value, style: style.copyWith(color: valueColor ?? (bold ? AppColors.primary : null))),
-      ]),
-    );
-  }
-}
-
-class _EmptyCart extends StatelessWidget {
-  @override
-  Widget build(BuildContext context) {
-    return Center(child: Column(mainAxisAlignment: MainAxisAlignment.center, children: [
-      const Icon(Icons.shopping_cart_outlined, size: 72, color: AppColors.textHint),
-      const SizedBox(height: AppSpacing.md),
-      Text('Your cart is empty', style: AppTypography.headingSmall),
-      const SizedBox(height: AppSpacing.xs),
-      Text('Add items from a restaurant to get started',
-          style: AppTypography.bodyMedium.copyWith(color: AppColors.textSecondary)),
-    ]));
   }
 }

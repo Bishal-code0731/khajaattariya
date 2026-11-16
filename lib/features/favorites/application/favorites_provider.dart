@@ -1,82 +1,113 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../../../core/network/connectivity_provider.dart';
+import '../../../core/network/retry_queue.dart';
 import '../../../main.dart';
 import '../domain/models/favorite_model.dart';
 
-final favoritesProvider =
-StreamProvider.family<List<FavoriteModel>, String>((ref, userId) {
+part 'favorites_provider.g.dart';
+
+const favoriteToggleRequestType = 'favorite_toggle';
+
+Future<void> performFavoriteToggle(Map<String, dynamic> payload) async {
+  final userId = payload['userId'] as String;
+  final restaurantId = payload['restaurantId'] as String;
+
+  final existing = await supabase
+      .from('favorites')
+      .select('id')
+      .eq('user_id', userId)
+      .eq('restaurant_id', restaurantId)
+      .maybeSingle();
+
+  if (existing != null) {
+    await supabase
+        .from('favorites')
+        .delete()
+        .eq('id', existing['id'] as String);
+  } else {
+    await supabase.from('favorites').insert({
+      'user_id': userId,
+      'restaurant_id': restaurantId,
+    });
+  }
+}
+
+@riverpod
+Stream<List<FavoriteModel>> favorites(Ref ref, String userId) {
   return supabase
       .from('favorites')
       .stream(primaryKey: ['id'])
       .eq('user_id', userId)
       .order('created_at', ascending: false)
       .asyncMap((data) async {
-    final List<FavoriteModel> favorites = [];
-    for (final map in data) {
-      final restaurant = await supabase
-          .from('restaurants')
-          .select('name, image_url, cuisine_type, rating')
-          .eq('id', map['restaurant_id'] as String)
-          .maybeSingle();
-      favorites.add(FavoriteModel.fromMap({
-        ...map,
-        'restaurants': restaurant ?? {},
-      }));
-    }
-    return favorites;
-  });
-});
+        if (data.isEmpty) return const <FavoriteModel>[];
+
+        final restaurantIds =
+            data.map((m) => m['restaurant_id'] as String).toSet().toList();
+        final restaurantRows = await supabase
+            .from('restaurants')
+            .select(
+                'id, name, image_url, cuisine_type, rating, delivery_time_min')
+            .inFilter('id', restaurantIds);
+        final restaurantById = {
+          for (final r in restaurantRows) r['id'] as String: r,
+        };
+
+        return data
+            .map((map) => FavoriteModel.fromMap({
+                  ...map,
+                  'restaurants': restaurantById[map['restaurant_id']] ?? {},
+                }))
+            .toList();
+      });
+}
 
 // Whether a specific restaurant is favorited
-final isFavoriteProvider =
-FutureProvider.family<bool, ({String userId, String restaurantId})>(
-        (ref, args) async {
-      final data = await supabase
-          .from('favorites')
-          .select('id')
-          .eq('user_id', args.userId)
-          .eq('restaurant_id', args.restaurantId)
-          .maybeSingle();
-      return data != null;
-    });
+@riverpod
+Future<bool> isFavorite(
+    Ref ref, ({String userId, String restaurantId}) args) async {
+  final data = await supabase
+      .from('favorites')
+      .select('id')
+      .eq('user_id', args.userId)
+      .eq('restaurant_id', args.restaurantId)
+      .maybeSingle();
+  return data != null;
+}
 
-final favoriteToggleProvider =
-StateNotifierProvider<FavoriteToggleNotifier, AsyncValue<void>>(
-        (ref) => FavoriteToggleNotifier(ref));
-
-class FavoriteToggleNotifier extends StateNotifier<AsyncValue<void>> {
-  final Ref _ref;
-  FavoriteToggleNotifier(this._ref) : super(const AsyncValue.data(null));
+@riverpod
+class FavoriteToggle extends _$FavoriteToggle {
+  @override
+  AsyncValue<void> build(String restaurantId) => const AsyncValue.data(null);
 
   Future<void> toggle({
     required String userId,
     required String restaurantId,
   }) async {
+    if (state.isLoading) return;
+
+    final payload = {'userId': userId, 'restaurantId': restaurantId};
+
+    if (!await checkIsOnline()) {
+      await RetryQueue.instance.enqueue(favoriteToggleRequestType, payload);
+      state = AsyncValue.error(
+        Exception("You're offline — this will sync once you're back online."),
+        StackTrace.current,
+      );
+      return;
+    }
+
     state = const AsyncValue.loading();
     try {
-      final existing = await supabase
-          .from('favorites')
-          .select('id')
-          .eq('user_id', userId)
-          .eq('restaurant_id', restaurantId)
-          .maybeSingle();
-
-      if (existing != null) {
-        await supabase
-            .from('favorites')
-            .delete()
-            .eq('id', existing['id'] as String);
-      } else {
-        await supabase.from('favorites').insert({
-          'user_id': userId,
-          'restaurant_id': restaurantId,
-        });
-      }
-
-      _ref.invalidate(isFavoriteProvider(
-          (userId: userId, restaurantId: restaurantId)));
-      _ref.invalidate(favoritesProvider(userId));
+      await performFavoriteToggle(payload);
+      ref.invalidate(
+          isFavoriteProvider((userId: userId, restaurantId: restaurantId)));
+      ref.invalidate(favoritesProvider(userId));
       state = const AsyncValue.data(null);
     } catch (e) {
+      // The connectivity check passed but the request still failed (e.g.
+      await RetryQueue.instance.enqueue(favoriteToggleRequestType, payload);
       state = AsyncValue.error(e, StackTrace.current);
     }
   }

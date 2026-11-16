@@ -1,7 +1,7 @@
 class AddressModel {
   final String id;
   final String userId;
-  final String label; // Home, Work, Other
+  final String label;
   final String fullAddress;
   final String? landmark;
   final double? latitude;
@@ -33,17 +33,5 @@ class AddressModel {
       isDefault: map['is_default'] as bool? ?? false,
       createdAt: DateTime.parse(map['created_at'] as String),
     );
-  }
-
-  Map<String, dynamic> toMap() {
-    return {
-      'user_id': userId,
-      'label': label,
-      'full_address': fullAddress,
-      'landmark': landmark,
-      'latitude': latitude,
-      'longitude': longitude,
-      'is_default': isDefault,
-    };
   }
 }

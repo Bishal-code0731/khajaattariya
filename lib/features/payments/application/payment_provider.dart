@@ -1,230 +1,269 @@
-import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:http/http.dart' as http;
+import 'package:riverpod_annotation/riverpod_annotation.dart';
+import '../../../core/utils/app_logger.dart';
 import '../../../main.dart';
 import '../domain/models/payment_model.dart';
 
-const _supabaseUrl = 'https://xuupnxmqqvipfegxtoqm.supabase.co';
+part 'payment_provider.g.dart';
+
+const _khaltiReturnUrl = 'khajaattariya://payment/khalti-callback';
+const _websiteUrl = 'https://khajaattariya.com';
+
+/// Why a payment step failed, so the screen can show the right translated message.
+enum PaymentFailure {
+  /// A pending or completed payment already exists for the order.
+  alreadyInProgress,
+
+  /// Every order of this checkout is already paid.
+  alreadyPaid,
+
+  /// The gateway didn't return a checkout link.
+  gatewayUnavailable,
+
+  /// Khalti says the payment was cancelled, expired or refunded.
+  notCompleted,
+
+  /// Khalti hasn't finished processing the payment yet.
+  stillPending,
+}
+
+class PaymentException implements Exception {
+  const PaymentException(this.failure);
+  final PaymentFailure failure;
+  @override
+  String toString() => 'PaymentException(${failure.name})';
+}
+
+/// Outcome of asking Khalti about a payment.
+enum KhaltiCheckResult { received, pending, failed }
 
 class PaymentState {
   final bool isLoading;
-  final String? error;
+  final Object? error;
   final String? khaltiPaymentUrl;
-  final String? stripeClientSecret;
+  final String? khaltiPidx;
   final bool isSuccess;
 
   const PaymentState({
     this.isLoading = false,
     this.error,
     this.khaltiPaymentUrl,
-    this.stripeClientSecret,
+    this.khaltiPidx,
     this.isSuccess = false,
   });
 
   PaymentState copyWith({
     bool? isLoading,
-    String? error,
+    Object? error,
     String? khaltiPaymentUrl,
-    String? stripeClientSecret,
+    String? khaltiPidx,
     bool? isSuccess,
   }) {
     return PaymentState(
       isLoading: isLoading ?? this.isLoading,
       error: error,
       khaltiPaymentUrl: khaltiPaymentUrl ?? this.khaltiPaymentUrl,
-      stripeClientSecret: stripeClientSecret ?? this.stripeClientSecret,
+      khaltiPidx: khaltiPidx ?? this.khaltiPidx,
       isSuccess: isSuccess ?? this.isSuccess,
     );
   }
 }
 
-final paymentNotifierProvider =
-StateNotifierProvider<PaymentNotifier, PaymentState>((ref) => PaymentNotifier());
+@Riverpod(keepAlive: true)
+class PaymentNotifier extends _$PaymentNotifier {
+  @override
+  PaymentState build() => const PaymentState();
 
-class PaymentNotifier extends StateNotifier<PaymentState> {
-  PaymentNotifier() : super(const PaymentState());
+  /// Server totals for the given orders, skipping already-paid ones.
+  Future<Map<String, double>> _unpaidServerTotals(List<String> orderIds) async {
+    final rows = await supabase
+        .from('orders')
+        .select('id, total_amount, payment_status, status')
+        .inFilter('id', orderIds);
+    final totals = <String, double>{};
+    for (final row in rows) {
+      if (row['payment_status'] == 'paid' || row['status'] == 'cancelled') {
+        continue;
+      }
+      totals[row['id'] as String] = (row['total_amount'] as num).toDouble();
+    }
+    return totals;
+  }
 
-  Map<String, String> get _headers => {
-    'Content-Type': 'application/json',
-    'Authorization': 'Bearer ${supabase.auth.currentSession?.accessToken}',
-  };
+  Future<void> _assertNoActivePayment(Iterable<String> orderIds) async {
+    final existing = await supabase
+        .from('payments')
+        .select('order_id')
+        .inFilter('order_id', orderIds.toList())
+        .inFilter('status', ['pending', 'completed']);
+    if (existing.isNotEmpty) {
+      throw const PaymentException(PaymentFailure.alreadyInProgress);
+    }
+  }
 
-  // ── KHALTI ────────────────────────────────────────────────
+  // KHALTI
 
   Future<String?> initiateKhaltiPayment({
-    required String orderId,
+    required List<String> orderIds,
     required String customerId,
-    required double amount,
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final response = await http.post(
-        Uri.parse('$_supabaseUrl/functions/v1/khalti-initiate'),
-        headers: _headers,
-        body: jsonEncode({
-          'order_id': orderId,
-          'amount': (amount * 100).toInt(), // Rs to paisa
-          'purchase_order_name': 'KhajaAttariya Order',
-          'return_url': '$_supabaseUrl/functions/v1/khalti-return',
-          'website_url': 'https://khajaattariya.com',
-        }),
-      );
+      final totals = await _unpaidServerTotals(orderIds);
+      if (totals.isEmpty) {
+        throw const PaymentException(PaymentFailure.alreadyPaid);
+      }
+      await _assertNoActivePayment(totals.keys);
+      final totalAmount = totals.values.fold<double>(0, (s, a) => s + a);
 
-      if (response.statusCode != 200) {
-        throw Exception('Khalti error: ${response.body}');
+      final response = await supabase.functions.invoke(
+        'khalti-initiate',
+        body: {
+          'order_id': totals.keys.first,
+          'amount': (totalAmount * 100).round(), // rupees → paisa
+          'purchase_order_name': totals.length > 1
+              ? 'KhajaAttariya Order (${totals.length} restaurants)'
+              : 'KhajaAttariya Order',
+          'return_url': _khaltiReturnUrl,
+          'website_url': _websiteUrl,
+        },
+      );
+      final data = response.data;
+      if (data is! Map ||
+          data['pidx'] is! String ||
+          data['payment_url'] is! String) {
+        AppLogger.warning('Payment', 'khalti-initiate returned no pidx');
+        throw const PaymentException(PaymentFailure.gatewayUnavailable);
+      }
+      final payload = Map<String, dynamic>.from(data);
+      final pidx = payload['pidx'] as String;
+      final paymentUrl = payload['payment_url'] as String;
+
+      for (final orderId in totals.keys) {
+        await supabase.from('payments').insert({
+          'order_id': orderId,
+          'customer_id': customerId,
+          'method': 'khalti',
+          'status': 'pending',
+          'currency': 'NPR',
+          'gateway_ref': pidx,
+          'gateway_payload': payload,
+        });
+        await _logEvent(
+            orderId: orderId, pidx: pidx, event: 'initiated', payload: payload);
       }
 
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final pidx = data['pidx'] as String;
-      final paymentUrl = data['payment_url'] as String;
-
-      await supabase.from('payments').insert({
-        'order_id': orderId,
-        'customer_id': customerId,
-        'method': 'khalti',
-        'status': 'pending',
-        'amount': amount,
-        'currency': 'NPR',
-        'gateway_ref': pidx,
-        'gateway_payload': data,
-      });
-
-      await _logEvent(orderId: orderId, event: 'initiated', payload: data);
-
-      state = state.copyWith(isLoading: false, khaltiPaymentUrl: paymentUrl);
+      state = state.copyWith(
+          isLoading: false, khaltiPaymentUrl: paymentUrl, khaltiPidx: pidx);
       return paymentUrl;
     } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
+      AppLogger.warning('Payment', 'khalti initiate failed: $e');
+      state = state.copyWith(isLoading: false, error: e);
       return null;
     }
   }
 
-  Future<bool> verifyKhaltiPayment({
+  /// Asks Khalti (through the khalti-verify function) how the payment went.
+  Future<KhaltiCheckResult> checkKhaltiPayment({
     required String pidx,
-    required String orderId,
+    required List<String> orderIds,
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final response = await http.post(
-        Uri.parse('$_supabaseUrl/functions/v1/khalti-verify'),
-        headers: _headers,
-        body: jsonEncode({'pidx': pidx}),
+      final response = await supabase.functions.invoke(
+        'khalti-verify',
+        body: {'pidx': pidx},
       );
+      final data = response.data;
+      final status = data is Map ? data['status'] as String? : null;
+      final payload =
+          data is Map ? Map<String, dynamic>.from(data) : <String, dynamic>{};
 
-      if (response.statusCode != 200) throw Exception('Khalti verify failed');
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final status = data['status'] as String?;
-
-      if (status == 'Completed') {
-        await supabase.from('payments')
-            .update({'status': 'completed', 'gateway_payload': data})
-            .eq('gateway_ref', pidx);
-
-        await supabase.from('orders')
-            .update({'payment_status': 'paid'})
-            .eq('id', orderId);
-
-        await _logEvent(orderId: orderId, event: 'verified', payload: data);
-
-        state = state.copyWith(isLoading: false, isSuccess: true);
-        return true;
+      final KhaltiCheckResult result;
+      switch (status) {
+        case 'Completed':
+          result = KhaltiCheckResult.received;
+        case 'Pending':
+        case 'Initiated':
+          result = KhaltiCheckResult.pending;
+        default:
+          result = KhaltiCheckResult.failed;
       }
-      throw Exception('Payment not completed. Status: $status');
+      for (final orderId in orderIds) {
+        await _logEvent(
+          orderId: orderId,
+          pidx: pidx,
+          event: 'client_checked_${status ?? 'unknown'}',
+          payload: payload,
+        );
+      }
+      state = state.copyWith(
+        isLoading: false,
+        isSuccess: result == KhaltiCheckResult.received,
+      );
+      return result;
     } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
-      return false;
+      AppLogger.warning('Payment', 'khalti check failed: $e');
+      state = state.copyWith(isLoading: false, error: e);
+      return KhaltiCheckResult.pending;
     }
   }
 
-  // ── STRIPE ────────────────────────────────────────────────
+  // CASH
 
-  Future<String?> initiateStripePayment({
-    required String orderId,
+  Future<bool> placeCashOrder({
+    required List<String> orderIds,
     required String customerId,
-    required double amount,
-    String? customerEmail,
   }) async {
     state = state.copyWith(isLoading: true, error: null);
     try {
-      final response = await http.post(
-        Uri.parse('$_supabaseUrl/functions/v1/stripe-initiate'),
-        headers: _headers,
-        body: jsonEncode({
+      final totals = await _unpaidServerTotals(orderIds);
+      final existing = await supabase
+          .from('payments')
+          .select('order_id, method, status')
+          .inFilter('order_id', totals.keys.toList())
+          .inFilter('status', ['pending', 'completed']);
+      final covered = {
+        for (final p in existing)
+          if (p['status'] == 'completed' || p['method'] == 'cash')
+            p['order_id'] as String,
+      };
+      for (final orderId in totals.keys) {
+        if (covered.contains(orderId)) continue;
+        await supabase.from('payments').insert({
           'order_id': orderId,
-          'amount': (amount * 100).toInt(), // cents
-          'currency': 'usd',
-          'customer_email': customerEmail,
-        }),
-      );
-
-      if (response.statusCode != 200) {
-        throw Exception('Stripe error: ${response.body}');
+          'customer_id': customerId,
+          'method': 'cash',
+          'status': 'pending',
+          'currency': 'NPR',
+        });
       }
-
-      final data = jsonDecode(response.body) as Map<String, dynamic>;
-      final clientSecret = data['client_secret'] as String;
-      final paymentIntentId = data['id'] as String;
-
-      await supabase.from('payments').insert({
-        'order_id': orderId,
-        'customer_id': customerId,
-        'method': 'stripe',
-        'status': 'pending',
-        'amount': amount,
-        'currency': 'usd',
-        'gateway_ref': paymentIntentId,
-        'gateway_payload': data,
-      });
-
-      await _logEvent(orderId: orderId, event: 'initiated', payload: data);
-
-      state = state.copyWith(isLoading: false, stripeClientSecret: clientSecret);
-      return clientSecret;
-    } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
-      return null;
-    }
-  }
-
-  Future<bool> confirmStripePayment({
-    required String paymentIntentId,
-    required String orderId,
-  }) async {
-    state = state.copyWith(isLoading: true, error: null);
-    try {
-      await supabase.from('payments')
-          .update({'status': 'completed'})
-          .eq('gateway_ref', paymentIntentId);
-
-      await supabase.from('orders')
-          .update({'payment_status': 'paid'})
-          .eq('id', orderId);
-
-      await _logEvent(
-        orderId: orderId,
-        event: 'verified',
-        payload: {'payment_intent_id': paymentIntentId},
-      );
-
       state = state.copyWith(isLoading: false, isSuccess: true);
       return true;
     } catch (e) {
-      state = state.copyWith(isLoading: false, error: e.toString());
+      AppLogger.warning('Payment', 'cash order failed: $e');
+      state = state.copyWith(isLoading: false, error: e);
       return false;
     }
   }
 
-  // ── HELPER ────────────────────────────────────────────────
+  // HELPER
 
   Future<void> _logEvent({
     required String orderId,
+    required String pidx,
     required String event,
     required Map<String, dynamic> payload,
   }) async {
     try {
       final payment = await supabase
-          .from('payments').select('id').eq('order_id', orderId).maybeSingle();
+          .from('payments')
+          .select('id')
+          .eq('order_id', orderId)
+          .eq('gateway_ref', pidx)
+          .order('created_at', ascending: false)
+          .limit(1)
+          .maybeSingle();
       if (payment != null) {
         await supabase.from('payment_logs').insert({
           'payment_id': payment['id'],
@@ -232,28 +271,34 @@ class PaymentNotifier extends StateNotifier<PaymentState> {
           'payload': payload,
         });
       }
-    } catch (_) {}
+    } catch (e) {
+      AppLogger.warning(
+          'Payment', 'Failed to log event "$event" for order $orderId: $e');
+    }
   }
 
   void reset() => state = const PaymentState();
 }
 
-// ── Providers ──────────────────────────────────────────────
+// Providers
 
-final platformSettingsProvider = FutureProvider<Map<String, String>>((ref) async {
+@Riverpod(keepAlive: true)
+Future<Map<String, String>> platformSettings(Ref ref) async {
   final data = await supabase.from('platform_settings').select();
   return {
     for (final row in (data as List))
       row['key'] as String: row['value'] as String
   };
-});
+}
 
-final customerPaymentsProvider =
-FutureProvider.family<List<PaymentModel>, String>((ref, customerId) async {
+@Riverpod(keepAlive: true)
+Future<List<PaymentModel>> customerPayments(Ref ref, String customerId) async {
   final data = await supabase
-      .from('payments').select().eq('customer_id', customerId)
+      .from('payments')
+      .select()
+      .eq('customer_id', customerId)
       .order('created_at', ascending: false);
   return (data as List)
       .map((m) => PaymentModel.fromMap(m as Map<String, dynamic>))
       .toList();
-});
+}

@@ -10,8 +10,12 @@ class OrderTimelineEvent {
   final DateTime createdAt;
 
   const OrderTimelineEvent({
-    required this.id, required this.orderId, required this.status,
-    this.note, this.actorId, required this.createdAt,
+    required this.id,
+    required this.orderId,
+    required this.status,
+    this.note,
+    this.actorId,
+    required this.createdAt,
   });
 
   factory OrderTimelineEvent.fromMap(Map<String, dynamic> map) {
@@ -27,26 +31,49 @@ class OrderTimelineEvent {
 
   String get statusLabel {
     switch (status) {
-      case 'pending':   return 'Order Placed';
-      case 'confirmed': return 'Confirmed by Restaurant';
-      case 'preparing': return 'Being Prepared';
-      case 'ready':     return 'Ready for Pickup';
-      case 'picked_up': return 'Rider Picked Up';
-      case 'delivered': return 'Delivered';
-      case 'cancelled': return 'Cancelled';
-      default:          return status.replaceAll('_', ' ');
+      case 'pending':
+        return 'Order Placed';
+      case 'confirmed':
+        return 'Confirmed by Restaurant';
+      case 'preparing':
+        return 'Being Prepared';
+      case 'ready':
+        return 'Ready for Pickup';
+      case 'picked_up':
+        return 'Rider Picked Up';
+      case 'delivered':
+        return 'Delivered';
+      case 'cancelled':
+        return 'Cancelled';
+      default:
+        return status.replaceAll('_', ' ');
     }
   }
 }
 
-final orderTimelineProvider =
-StreamProvider.family<List<OrderTimelineEvent>, String>((ref, orderId) {
+final orderTimelineProvider = StreamProvider.autoDispose
+    .family<List<OrderTimelineEvent>, String>((ref, orderId) {
   return supabase
       .from('order_timeline')
       .stream(primaryKey: ['id'])
       .eq('order_id', orderId)
       .order('created_at', ascending: true)
-      .map((data) => data
-      .map((m) => OrderTimelineEvent.fromMap(m as Map<String, dynamic>))
-      .toList());
+      .map((data) => data.map((m) => OrderTimelineEvent.fromMap(m)).toList());
+});
+
+final orderTimelinesBatchProvider = FutureProvider.autoDispose
+    .family<Map<String, List<OrderTimelineEvent>>, List<String>>(
+        (ref, orderIds) async {
+  if (orderIds.isEmpty) return {};
+  final data = await supabase
+      .from('order_timeline')
+      .select()
+      .inFilter('order_id', orderIds)
+      .order('created_at', ascending: true);
+  final byOrder = <String, List<OrderTimelineEvent>>{};
+  for (final row in (data as List)) {
+    final event = OrderTimelineEvent.fromMap(row as Map<String, dynamic>);
+    (byOrder[event.orderId] ??= []).add(event);
+  }
+  return byOrder;
 });

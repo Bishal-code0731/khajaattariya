@@ -6,6 +6,9 @@ class FavoriteModel {
   final String restaurantImageUrl;
   final String cuisineType;
   final double rating;
+
+  /// Typical delivery time in minutes (null when unknown).
+  final int? deliveryTimeMin;
   final DateTime createdAt;
 
   const FavoriteModel({
@@ -16,19 +19,21 @@ class FavoriteModel {
     required this.restaurantImageUrl,
     required this.cuisineType,
     required this.rating,
+    this.deliveryTimeMin,
     required this.createdAt,
   });
 
   factory FavoriteModel.fromMap(Map<String, dynamic> map) {
-    final r = map['restaurants'] as Map<String, dynamic>? ?? {};
+    final restaurant = map['restaurants'] as Map<String, dynamic>? ?? {};
     return FavoriteModel(
       id: map['id'] as String,
       userId: map['user_id'] as String,
       restaurantId: map['restaurant_id'] as String,
-      restaurantName: r['name'] as String? ?? '',
-      restaurantImageUrl: r['image_url'] as String? ?? '',
-      cuisineType: r['cuisine_type'] as String? ?? '',
-      rating: (r['rating'] as num?)?.toDouble() ?? 0.0,
+      restaurantName: restaurant['name'] as String? ?? '',
+      restaurantImageUrl: restaurant['image_url'] as String? ?? '',
+      cuisineType: restaurant['cuisine_type'] as String? ?? '',
+      rating: (restaurant['rating'] as num?)?.toDouble() ?? 0.0,
+      deliveryTimeMin: (restaurant['delivery_time_min'] as num?)?.toInt(),
       createdAt: DateTime.parse(map['created_at'] as String),
     );
   }

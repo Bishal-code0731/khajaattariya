@@ -1,10 +1,10 @@
 class RestaurantHoursModel {
   final String id;
   final String restaurantId;
-  final int weekday; // 1=Monday … 7=Sunday (matches DateTime.weekday)
+  final int weekday;
   final bool isOpen;
-  final String? openTime;  // "09:00"
-  final String? closeTime; // "22:00"
+  final String? openTime;
+  final String? closeTime;
 
   const RestaurantHoursModel({
     required this.id,
@@ -15,34 +15,12 @@ class RestaurantHoursModel {
     this.closeTime,
   });
 
-  factory RestaurantHoursModel.fromMap(Map<String, dynamic> map) {
-    return RestaurantHoursModel(
-      id: map['id'] as String,
-      restaurantId: map['restaurant_id'] as String,
-      weekday: map['weekday'] as int,
-      isOpen: map['is_open'] as bool? ?? true,
-      openTime: map['open_time'] as String?,
-      closeTime: map['close_time'] as String?,
-    );
+  String get weekdayName {
+    const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+    return days[(weekday - 1).clamp(0, 6)];
   }
 
-  Map<String, dynamic> toMap() {
-    return {
-      'restaurant_id': restaurantId,
-      'weekday': weekday,
-      'is_open': isOpen,
-      'open_time': openTime,
-      'close_time': closeTime,
-    };
-  }
-
-  String get dayName {
-    const days = [
-      '', 'Monday', 'Tuesday', 'Wednesday',
-      'Thursday', 'Friday', 'Saturday', 'Sunday'
-    ];
-    return days[weekday];
-  }
+  String get dayName => weekdayName;
 
   RestaurantHoursModel copyWith({
     bool? isOpen,
@@ -56,6 +34,17 @@ class RestaurantHoursModel {
       isOpen: isOpen ?? this.isOpen,
       openTime: openTime ?? this.openTime,
       closeTime: closeTime ?? this.closeTime,
+    );
+  }
+
+  factory RestaurantHoursModel.fromMap(Map<String, dynamic> map) {
+    return RestaurantHoursModel(
+      id: map['id'] as String,
+      restaurantId: map['restaurant_id'] as String,
+      weekday: map['weekday'] as int,
+      isOpen: map['is_open'] as bool? ?? true,
+      openTime: map['open_time'] as String?,
+      closeTime: map['close_time'] as String?,
     );
   }
 }
